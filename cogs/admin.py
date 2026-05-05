@@ -125,9 +125,9 @@ class Admin(commands.Cog):
                             root = ET.fromstring(xml_data)
                             
                             urls = [elem.text for elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
-                            # 카테고리, 태그, 방명록, 블로그 홈 등 제외
+                            # 카테고리, 태그, 방명록, 블로그 홈, 모바일 버전(/m/) 등 제외
                             ignore_suffixes = ('/category', '/tag', '/guestbook', '/manage')
-                            post_urls = [u for u in urls if u and not u.endswith(ignore_suffixes) and u != 블로그.rstrip("/")]
+                            post_urls = [u for u in urls if u and not u.endswith(ignore_suffixes) and "/m/" not in u and u != 블로그.rstrip("/")]
                             
                             for link in post_urls:
                                 if link in added_links:

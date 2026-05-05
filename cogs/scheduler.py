@@ -162,7 +162,7 @@ class Scheduler(commands.Cog):
                     
                     urls = [elem.text for elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
                     ignore_suffixes = ('/category', '/tag', '/guestbook', '/manage')
-                    post_urls = [u for u in urls if u and not u.endswith(ignore_suffixes) and u != blog_url]
+                    post_urls = [u for u in urls if u and not u.endswith(ignore_suffixes) and "/m/" not in u and u != blog_url]
                     
                     for link in post_urls:
                         # 이미 DB에 있는 글이면 패스
