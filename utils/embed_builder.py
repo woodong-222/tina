@@ -17,10 +17,9 @@ def new_post_embed(author_name: str, title: str, link: str, published_at: str) -
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
-    embed.add_field(name="제목", value=title, inline=False)
+    embed.add_field(name="제목", value=f"[{title}]({link})", inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
-    embed.add_field(name="링크", value=f"[글 읽으러 가기]({link})", inline=False)
     embed.set_footer(text="티나 • 블로그 포스팅 알림")
 
     return embed
@@ -34,10 +33,9 @@ def missed_post_embed(author_name: str, title: str, link: str, published_at: str
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
-    embed.add_field(name="제목", value=title, inline=False)
+    embed.add_field(name="제목", value=f"[{title}]({link})", inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
-    embed.add_field(name="링크", value=f"[글 읽으러 가기]({link})", inline=False)
     embed.set_footer(text="티나 • 누락 감지")
 
     return embed
