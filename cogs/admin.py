@@ -1,17 +1,12 @@
 import logging
-import re
-import feedparser
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import datetime
-import aiohttp
-import xml.etree.ElementTree as ET
-from utils.time_utils import get_kst_now
 
 import database as db
+from utils.blog_utils import normalize_tistory_url, check_url_accessible, scan_and_save_existing_posts
 from utils.embed_builder import (
-    status_embed, help_embed, member_list_embed, 
+    status_embed, help_embed, member_list_embed,
     info_embed, error_embed, register_success_embed,
     already_registered_embed, not_registered_embed,
     invalid_tistory_url_embed, connection_error_embed,
@@ -47,115 +42,31 @@ class Admin(commands.Cog):
     async def register_member(self, interaction: discord.Interaction, 유저: discord.Member, 블로그: str):
         await interaction.response.defer()
 
-        # 1. 정규표현식으로 티스토리 아이디 추출
-        match = re.search(r'(?:www\.)?([a-z0-9-]+)\.tistory\.com', 블로그.lower())
-        
-        if not match or match.group(1) == "www":
+        blog_url = normalize_tistory_url(블로그)
+        if not blog_url:
             await interaction.followup.send(embed=invalid_tistory_url_embed())
             return
 
-        blog_id = match.group(1)
-        블로그 = f"https://{blog_id}.tistory.com"
-
-        # 2. URL 접속 가능 여부 확인
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(블로그, timeout=10) as resp:
-                    if resp.status != 200:
-                        await interaction.followup.send(embed=connection_error_embed(블로그, resp.status))
-                        return
-            except Exception as e:
-                logger.error(f"URL 검증 실패: {블로그} - {e}")
-                await interaction.followup.send(embed=connection_error_embed(블로그))
-                return
+        ok, status_code = await check_url_accessible(blog_url)
+        if not ok:
+            await interaction.followup.send(embed=connection_error_embed(blog_url, status_code))
+            return
 
         guild_id = str(interaction.guild_id)
-        success = await db.add_member(
-            guild_id=guild_id,
-            discord_id=str(유저.id),
-            discord_name=유저.display_name,
-            blog_url=블로그
-        )
-
+        success = await db.add_member(guild_id, str(유저.id), 유저.display_name, blog_url)
         if not success:
             await interaction.followup.send(embed=already_registered_embed(유저.display_name))
             return
 
-        rss_url = 블로그.rstrip("/") + "/rss"
-        sitemap_url = 블로그.rstrip("/") + "/sitemap.xml"
+        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
         existing_count = 0
-        added_links = set()
+        if member:
+            try:
+                existing_count = await scan_and_save_existing_posts(member, blog_url)
+            except Exception as e:
+                logger.error("기존 글 스캔 실패 [%s]: %s", 유저.display_name, e)
 
-        try:
-            member = await db.get_member_by_discord_id(guild_id, str(유저.id))
-            if not member:
-                return
-
-            # 1. RSS 파싱 (최근 글 위주, 제목/날짜 정확함)
-            feed = feedparser.parse(rss_url)
-            if feed.entries:
-                for entry in feed.entries:
-                    link = entry.get("link", "").strip()
-                    if not link or link in added_links:
-                        continue
-
-                    title = entry.get("title", "제목 없음").strip()
-                    try:
-                        published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                        published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    await db.add_post(
-                        member_id=member["id"],
-                        title=title,
-                        link=link,
-                        published_at=published_str,
-                        is_initial=True
-                    )
-                    added_links.add(link)
-                    existing_count += 1
-
-            # 2. 사이트맵 파싱 (과거 글 전체 스캔)
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.get(sitemap_url, timeout=10) as resp:
-                        if resp.status == 200:
-                            xml_data = await resp.text()
-                            root = ET.fromstring(xml_data)
-                            
-                            urls = [elem.text for elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
-                            # 카테고리, 태그, 방명록, 블로그 홈, 모바일 버전(/m/) 등 제외
-                            ignore_patterns = ('/category', '/tag', '/guestbook', '/manage')
-                            post_urls = [
-                                u for u in urls 
-                                if u and not any(p in u for p in ignore_patterns) 
-                                and "/m/" not in u 
-                                and u != 블로그.rstrip("/")
-                            ]
-                            
-                            for link in post_urls:
-                                if link in added_links:
-                                    continue
-                                
-                                # 사이트맵에는 제목/날짜 정보가 없으므로 더미 데이터 삽입 (is_initial=1 이라 표시되지 않음)
-                                await db.add_post(
-                                    member_id=member["id"],
-                                    title="이전 글",
-                                    link=link,
-                                    published_at=get_kst_now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    is_initial=True
-                                )
-                                added_links.add(link)
-                                existing_count += 1
-                except Exception as e:
-                    logger.error("사이트맵 스캔 실패 [%s]: %s", 유저.display_name, e)
-
-        except Exception as e:
-            logger.error("기존 글 스캔 실패 [%s]: %s", 유저.display_name, e)
-
-        embed = register_success_embed(유저.mention, 블로그, existing_count, is_admin=True)
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count, is_admin=True))
         logger.info("멤버 등록: %s (기존 글 %d편)", 유저.display_name, existing_count)
 
     @app_commands.command(name="멤버삭제", description="[관리자] 멤버를 삭제합니다")
@@ -171,7 +82,6 @@ class Admin(commands.Cog):
             await interaction.followup.send(embed=embed)
         else:
             await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
-
 
     @app_commands.command(name="채널설정", description="[관리자] 알림 채널을 설정합니다")
     @app_commands.describe(채널="알림을 보낼 채널")

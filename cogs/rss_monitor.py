@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import feedparser
 import discord
@@ -73,7 +74,8 @@ class RSSMonitor(commands.Cog):
 
     async def _check_feed(self, member: dict, channel: discord.TextChannel) -> int:
         """개별 멤버의 RSS 피드를 파싱하여 새 글을 찾고 알림. 감지한 새 글 수를 반환."""
-        feed = feedparser.parse(member["rss_url"])
+        loop = asyncio.get_running_loop()
+        feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
         new_count = 0
 
         if feed.bozo and not feed.entries:
@@ -133,9 +135,10 @@ class RSSMonitor(commands.Cog):
         if not channel:
             return 0
 
+        loop = asyncio.get_running_loop()
         for member in members:
             try:
-                feed = feedparser.parse(member["rss_url"])
+                feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
                 for entry in feed.entries:
                     link = entry.get("link", "").strip()
                     if not link or await db.is_post_exists(link):

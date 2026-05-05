@@ -70,11 +70,3 @@ def format_date_range(start: str, end: str) -> str:
     s = datetime.strptime(s_date, "%Y-%m-%d")
     e = datetime.strptime(e_date, "%Y-%m-%d")
     return f"{s.strftime('%m/%d')} ~ {e.strftime('%m/%d')}"
-
-
-def is_sunday() -> bool:
-    return get_kst_now().weekday() == 6
-
-
-def is_monday() -> bool:
-    return get_kst_now().weekday() == 0

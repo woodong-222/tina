@@ -6,8 +6,6 @@ import aiohttp
 import xml.etree.ElementTree as ET
 import re
 
-import re
-
 import database as db
 from utils.time_utils import get_week_range, get_last_week_range, get_kst_now, KST
 from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_embed

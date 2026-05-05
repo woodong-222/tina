@@ -194,7 +194,7 @@ def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> di
     return embed
 
 
-def help_embed(reset_day: str = "월요일", reset_time: str = "09:00") -> discord.Embed:
+def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_day: str = "일요일", remind_time: str = "09:00") -> discord.Embed:
     """도움말 Embed"""
     embed = discord.Embed(
         title="📖 티나 도움말",
@@ -233,8 +233,8 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00") -> disco
     embed.add_field(
         name="⏰ 티나가 알려드려요!",
         value=(
-            "• 주간 리포트: 매주 월요일 09:00\n"
-            "• 마감 리마인드: 매주 일요일 10:00"
+            f"• 주간 리포트: 매주 {reset_day} {reset_time}\n"
+            f"• 마감 리마인드: 매주 {remind_day} {remind_time}"
         ),
         inline=False
     )
