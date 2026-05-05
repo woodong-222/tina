@@ -264,8 +264,13 @@ class Commands(commands.Cog):
                             root = ET.fromstring(xml_data)
                             
                             urls = [elem.text for elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
-                            ignore_suffixes = ('/category', '/tag', '/guestbook', '/manage')
-                            post_urls = [u for u in urls if u and not u.endswith(ignore_suffixes) and "/m/" not in u and u != 블로그.rstrip("/")]
+                            ignore_patterns = ('/category', '/tag', '/guestbook', '/manage')
+                            post_urls = [
+                                u for u in urls 
+                                if u and not any(p in u for p in ignore_patterns) 
+                                and "/m/" not in u 
+                                and u != 블로그.rstrip("/")
+                            ]
                             
                             for link in post_urls:
                                 if link in added_links:
