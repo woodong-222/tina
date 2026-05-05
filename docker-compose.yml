@@ -1,0 +1,16 @@
+services:
+  tina:
+    build: .
+    image: woo204/tina:latest
+    container_name: tina
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10mb"
+        max-file: "3"
