@@ -38,7 +38,7 @@ class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="멤버신규등록", description="새 멤버를 등록합니다")
+    @app_commands.command(name="멤버신규등록", description="[관리자] 새 멤버를 등록합니다")
     @app_commands.describe(
         유저="등록할 디스코드 유저",
         블로그="티스토리 블로그 주소 (예: https://example.tistory.com)"
@@ -102,9 +102,9 @@ class Admin(commands.Cog):
                     title = entry.get("title", "제목 없음").strip()
                     try:
                         published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                        published_str = published_dt.strftime("%Y-%m-%d")
+                        published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
-                        published_str = get_kst_now().strftime("%Y-%m-%d")
+                        published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
                     await db.add_post(
                         member_id=member["id"],
@@ -138,7 +138,7 @@ class Admin(commands.Cog):
                                     member_id=member["id"],
                                     title="이전 글",
                                     link=link,
-                                    published_at=get_kst_now().strftime("%Y-%m-%d"),
+                                    published_at=get_kst_now().strftime("%Y-%m-%d %H:%M:%S"),
                                     is_initial=True
                                 )
                                 added_links.add(link)
@@ -153,7 +153,7 @@ class Admin(commands.Cog):
         await interaction.followup.send(embed=embed)
         logger.info("멤버 등록: %s (기존 글 %d편)", 유저.display_name, existing_count)
 
-    @app_commands.command(name="멤버삭제", description="멤버를 삭제합니다")
+    @app_commands.command(name="멤버삭제", description="[관리자] 멤버를 삭제합니다")
     @app_commands.describe(유저="삭제할 디스코드 유저")
     @is_admin()
     async def remove_member(self, interaction: discord.Interaction, 유저: discord.Member):
@@ -168,7 +168,7 @@ class Admin(commands.Cog):
             await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
 
 
-    @app_commands.command(name="채널설정", description="알림 채널을 설정합니다")
+    @app_commands.command(name="채널설정", description="[관리자] 알림 채널을 설정합니다")
     @app_commands.describe(채널="알림을 보낼 채널")
     @is_admin()
     async def set_channel(self, interaction: discord.Interaction, 채널: discord.TextChannel):
@@ -177,7 +177,7 @@ class Admin(commands.Cog):
         embed = info_embed("설정 완료", f"알림 채널을 {채널.mention}으로 설정했어요! 이제 이곳에서 소식을 전해드릴게요.", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="벌금설정", description="벌금 금액을 변경합니다")
+    @app_commands.command(name="벌금설정", description="[관리자] 벌금 금액을 변경합니다")
     @app_commands.describe(금액="벌금 금액 (원)")
     @is_admin()
     async def set_penalty(self, interaction: discord.Interaction, 금액: int):

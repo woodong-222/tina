@@ -14,8 +14,6 @@ from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_e
 
 logger = logging.getLogger(__name__)
 
-REPORT_TIME = time(hour=9, minute=0, tzinfo=KST)
-REMIND_TIME = time(hour=10, minute=0, tzinfo=KST)
 SCAN_TIME = time(hour=0, minute=0, tzinfo=KST) # 매일 자정 스캔
 
 
@@ -25,40 +23,43 @@ class Scheduler(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if not self.weekly_report_task.is_running():
-            self.weekly_report_task.start()
-            logger.info("주간 리포트 스케줄러 시작 (매주 월요일 %s)", REPORT_TIME)
-
-        if not self.remind_task.is_running():
-            self.remind_task.start()
-            logger.info("리마인드 스케줄러 시작 (매주 일요일 %s)", REMIND_TIME)
+        if not self.main_scheduler.is_running():
+            self.main_scheduler.start()
+            logger.info("메인 스케줄러 루프 시작 (1분 단위 체크)")
 
         if not self.daily_sitemap_scan.is_running():
             self.daily_sitemap_scan.start()
             logger.info("일일 누락 방지 스캔 스케줄러 시작 (매일 %s)", SCAN_TIME)
 
     def cog_unload(self):
-        self.weekly_report_task.cancel()
-        self.remind_task.cancel()
+        self.main_scheduler.cancel()
         self.daily_sitemap_scan.cancel()
 
-    @tasks.loop(time=REPORT_TIME)
-    async def weekly_report_task(self):
-        """매주 월요일 09:00에 모든 서버에 주간 리포트 발송 + 벌금 자동 부과"""
-        if get_kst_now().weekday() != 0:
-            logger.debug("오늘은 월요일이 아니므로 주간 리포트 및 벌금 정산을 건너뜁니다.")
-            return
-
-        logger.info("주간 리포트 생성 시작")
+    @tasks.loop(minutes=1)
+    async def main_scheduler(self):
+        """매 분마다 실행되며, 각 서버의 초기화/리마인드 시간에 도달했는지 확인"""
+        now = get_kst_now()
         guild_ids = await db.get_all_guild_ids()
 
         for guild_id in guild_ids:
             try:
-                await self._send_weekly_report(guild_id)
+                r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+                
+                # 1. 초기화 및 리포트 시간 체크
+                if now.weekday() == r_day and now.hour == r_hour and now.minute == r_min:
+                    logger.info("주간 리포트 발송 조건 충족 [Guild: %s]", guild_id)
+                    await self._send_weekly_report(guild_id, r_day, r_hour, r_min)
+                
+                # 2. 리마인드 시간 체크 (정확히 24시간 전)
+                remind_day = (r_day - 1) % 7
+                if now.weekday() == remind_day and now.hour == r_hour and now.minute == r_min:
+                    logger.info("마감 리마인드 발송 조건 충족 [Guild: %s]", guild_id)
+                    await self._send_remind(guild_id, r_day, r_hour, r_min)
+                    
             except Exception as e:
-                logger.error("주간 리포트 실패 [Guild: %s]: %s", guild_id, e)
+                logger.error("메인 스케줄러 오류 [Guild: %s]: %s", guild_id, e)
 
-    async def _send_weekly_report(self, guild_id: str):
+    async def _send_weekly_report(self, guild_id: str, r_day: int, r_hour: int, r_min: int):
         channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
         if not channel_id:
             return
@@ -67,7 +68,7 @@ class Scheduler(commands.Cog):
         if not channel:
             return
 
-        week_start, week_end = get_last_week_range()
+        week_start, week_end = get_last_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
 
         penalty_amount_str = await db.get_setting("penalty_amount", default="5000", guild_id=guild_id)
@@ -95,27 +96,11 @@ class Scheduler(commands.Cog):
         await channel.send(embed=embed)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
-    @weekly_report_task.before_loop
-    async def before_weekly_report(self):
+    @main_scheduler.before_loop
+    async def before_main_scheduler(self):
         await self.bot.wait_until_ready()
 
-    @tasks.loop(time=REMIND_TIME)
-    async def remind_task(self):
-        """매주 일요일 10:00에 모든 서버에 미작성자 리마인드"""
-        if get_kst_now().weekday() != 6:
-            logger.debug("오늘은 일요일이 아니므로 마감 리마인드를 건너뜁니다.")
-            return
-
-        logger.info("마감 리마인드 시작")
-        guild_ids = await db.get_all_guild_ids()
-
-        for guild_id in guild_ids:
-            try:
-                await self._send_remind(guild_id)
-            except Exception as e:
-                logger.error("리마인드 실패 [Guild: %s]: %s", guild_id, e)
-
-    async def _send_remind(self, guild_id: str):
+    async def _send_remind(self, guild_id: str, r_day: int, r_hour: int, r_min: int):
         channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
         if not channel_id:
             return
@@ -124,7 +109,7 @@ class Scheduler(commands.Cog):
         if not channel:
             return
 
-        week_start, week_end = get_week_range()
+        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
 
         members_without_posts = []
@@ -140,10 +125,6 @@ class Scheduler(commands.Cog):
         embed = remind_embed(members_without_posts)
         await channel.send(content=f"{mentions}", embed=embed)
         logger.info("리마인드 발송 완료 [Guild: %s] (대상: %d명)", guild_id, len(members_without_posts))
-
-    @remind_task.before_loop
-    async def before_remind(self):
-        await self.bot.wait_until_ready()
 
     @tasks.loop(time=SCAN_TIME)
     async def daily_sitemap_scan(self):
@@ -200,7 +181,7 @@ class Scheduler(commands.Cog):
                         except Exception:
                             pass # 제목을 못 가져와도 진행
 
-                        published_str = get_kst_now().strftime("%Y-%m-%d")
+                        published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         # is_initial=False 로 저장해야 이번 주 통계에 카운트됨
                         saved = await db.add_post(

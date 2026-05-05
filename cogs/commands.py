@@ -33,7 +33,8 @@ class Commands(commands.Cog):
     async def stats(self, interaction: discord.Interaction, 유저: discord.Member = None):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
-        week_start, week_end = get_week_range()
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         month_start, month_end = get_month_range()
 
         if 유저:
@@ -86,7 +87,8 @@ class Commands(commands.Cog):
     async def status(self, interaction: discord.Interaction, 유저: discord.Member = None):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
-        week_start, week_end = get_week_range()
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
 
         if not members:
@@ -169,7 +171,14 @@ class Commands(commands.Cog):
 
     @app_commands.command(name="도움말", description="티나 사용법을 안내합니다")
     async def help_command(self, interaction: discord.Interaction):
-        embed = help_embed()
+        guild_id = str(interaction.guild_id)
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        
+        days = ["월", "화", "수", "목", "금", "토", "일"]
+        reset_day_str = f"{days[r_day]}요일"
+        reset_time_str = f"{r_hour:02d}:{r_min:02d}"
+        
+        embed = help_embed(reset_day_str, reset_time_str)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="신규등록", description="내 블로그를 봇에 등록합니다")
@@ -233,9 +242,9 @@ class Commands(commands.Cog):
                     title = entry.get("title", "제목 없음").strip()
                     try:
                         published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                        published_str = published_dt.strftime("%Y-%m-%d")
+                        published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
-                        published_str = get_kst_now().strftime("%Y-%m-%d")
+                        published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
                     await db.add_post(
                         member_id=member["id"],
@@ -266,7 +275,7 @@ class Commands(commands.Cog):
                                     member_id=member["id"],
                                     title="이전 글",
                                     link=link,
-                                    published_at=get_kst_now().strftime("%Y-%m-%d"),
+                                    published_at=get_kst_now().strftime("%Y-%m-%d %H:%M:%S"),
                                     is_initial=True
                                 )
                                 added_links.add(link)
@@ -299,6 +308,50 @@ class Commands(commands.Cog):
         guild_id = str(interaction.guild_id)
         members = await db.get_all_members(guild_id)
         embed = member_list_embed(members)
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="초기화설정", description="[관리자] 주간 통계 및 벌금 초기화 요일/시간을 설정합니다")
+    @app_commands.describe(요일="초기화 요일 (예: 월요일, 수)", 시간="초기화 시간 (예: 09:00, 15:30)")
+    @app_commands.default_permissions(administrator=True)
+    async def set_reset_time(self, interaction: discord.Interaction, 요일: str, 시간: str):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+        
+        # 1. 요일 파싱
+        day_map = {
+            "월": 0, "월요일": 0, "화": 1, "화요일": 1, "수": 2, "수요일": 2,
+            "목": 3, "목요일": 3, "금": 4, "금요일": 4, "토": 5, "토요일": 5,
+            "일": 6, "일요일": 6
+        }
+        
+        parsed_day = day_map.get(요일.strip())
+        if parsed_day is None:
+            await interaction.followup.send(embed=error_embed("올바른 요일을 입력해주세요! (예: 월요일, 수)"))
+            return
+            
+        # 2. 시간 파싱
+        try:
+            hour_str, min_str = 시간.split(":")
+            hour = int(hour_str)
+            minute = int(min_str)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError
+        except ValueError:
+            await interaction.followup.send(embed=error_embed("올바른 시간 형식을 입력해주세요! (예: 09:00, 15:30)"))
+            return
+            
+        # 3. DB 저장
+        await db.set_setting(guild_id, "reset_weekday", str(parsed_day))
+        await db.set_setting(guild_id, "reset_time", f"{hour:02d}:{minute:02d}")
+        
+        days = ["월", "화", "수", "목", "금", "토", "일"]
+        
+        embed = info_embed(
+            "초기화 시간 설정 완료",
+            f"이 서버의 주간 초기화 및 벌금 정산 시간이 **{days[parsed_day]}요일 {hour:02d}:{minute:02d}** (으)로 변경되었어요!\n"
+            f"마감 리마인드는 정확히 24시간 전인 **{days[(parsed_day-1)%7]}요일 {hour:02d}:{minute:02d}** 에 발송됩니다.",
+            color=0xF1C40F
+        )
         await interaction.followup.send(embed=embed)
 
 

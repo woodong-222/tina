@@ -196,11 +196,11 @@ def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> di
     return embed
 
 
-def help_embed() -> discord.Embed:
+def help_embed(reset_day: str = "월요일", reset_time: str = "09:00") -> discord.Embed:
     """도움말 Embed"""
     embed = discord.Embed(
         title="📖 티나 도움말",
-        description="티나는 여러분들의 블로그 활동을 응원해요! 화이팅! 💖",
+        description=f"티나는 여러분들의 블로그 활동을 응원해요! 화이팅! 💖\n\n이 서버는 매주 **{reset_day} {reset_time}**에 주간 정산이 진행됩니다.",
         color=COLOR_HELP,
         timestamp=get_kst_now()
     )
@@ -427,13 +427,14 @@ def connection_error_embed(blog_url: str, status_code: int = None) -> discord.Em
     return error_embed(desc)
 
 
-def welcome_embed(user_mention: str) -> discord.Embed:
+def welcome_embed(user_mention: str, reset_day: str = "월요일", reset_time: str = "09:00") -> discord.Embed:
     """새 멤버 환영 Embed"""
     embed = discord.Embed(
         title="반가워요",
         description=(
             f"안녕하세요! 저는 티나라고 해요.\n"
             f"티나는 {user_mention}님의 블로그 활동을 도와드려요.\n\n"
+            f"이 서버는 매주 **{reset_day} {reset_time}**에 주간 정산이 진행됩니다.\n"
             f"앞으로 같이 열심히 블로그 포스팅을 해봐요!"
         ),
         color=COLOR_SUCCESS,

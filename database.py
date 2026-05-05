@@ -131,7 +131,7 @@ async def get_posts_in_range(member_id: int, start_date: str, end_date: str) -> 
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT * FROM posts
-               WHERE member_id = ? AND date(published_at) BETWEEN ? AND ? AND is_initial = 0
+               WHERE member_id = ? AND published_at >= ? AND published_at <= ? AND is_initial = 0
                ORDER BY published_at DESC""",
             (member_id, start_date, end_date)
         )
@@ -143,7 +143,7 @@ async def get_post_count_in_range(member_id: int, start_date: str, end_date: str
     async with aiosqlite.connect(Config.DB_PATH) as db:
         cursor = await db.execute(
             """SELECT COUNT(*) FROM posts
-               WHERE member_id = ? AND date(published_at) BETWEEN ? AND ? AND is_initial = 0""",
+               WHERE member_id = ? AND published_at >= ? AND published_at <= ? AND is_initial = 0""",
             (member_id, start_date, end_date)
         )
         row = await cursor.fetchone()
@@ -209,6 +209,23 @@ async def get_setting(key: str, default: str = "", guild_id: str = None) -> str:
             )
         row = await cursor.fetchone()
         return row[0] if row else default
+
+
+async def get_reset_time(guild_id: str) -> tuple[int, int, int]:
+    """
+    서버의 초기화 시간을 가져옵니다.
+    반환: (weekday, hour, minute)
+    기본값: 월요일(0), 09, 00
+    """
+    weekday_str = await get_setting("reset_weekday", "0", guild_id)
+    time_str = await get_setting("reset_time", "09:00", guild_id)
+    
+    try:
+        weekday = int(weekday_str)
+        hour, minute = map(int, time_str.split(":"))
+        return weekday, hour, minute
+    except ValueError:
+        return 0, 9, 0
 
 
 async def set_setting(guild_id: str, key: str, value: str):

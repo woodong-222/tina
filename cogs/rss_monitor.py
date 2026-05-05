@@ -92,9 +92,9 @@ class RSSMonitor(commands.Cog):
 
             try:
                 published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                published_str = published_dt.strftime("%Y-%m-%d")
+                published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
-                published_str = get_kst_now().strftime("%Y-%m-%d")
+                published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
             saved = await db.add_post(
                 member_id=member["id"],
@@ -144,9 +144,9 @@ class RSSMonitor(commands.Cog):
                     title = entry.get("title", "제목 없음").strip()
                     try:
                         published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                        published_str = published_dt.strftime("%Y-%m-%d")
+                        published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
-                        published_str = get_kst_now().strftime("%Y-%m-%d")
+                        published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
                     saved = await db.add_post(member["id"], title, link, published_str)
                     if saved:
