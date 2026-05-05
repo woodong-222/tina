@@ -20,7 +20,7 @@ class Events(commands.Cog):
         logger.info("새 멤버 입장: %s (서버: %s)", member.display_name, member.guild.name)
 
         # 1. 설정된 알림 채널 가져오기
-        channel_id_str = await db.get_setting(guild_id, "notification_channel_id")
+        channel_id_str = await db.get_setting("notification_channel_id", guild_id=guild_id)
         
         if not channel_id_str:
             logger.debug("알림 채널이 설정되지 않아 환영 메시지를 보낼 수 없습니다. (서버: %s)", guild_id)
