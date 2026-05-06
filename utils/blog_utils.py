@@ -105,9 +105,10 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
                 published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
-        await db.add_post(member["id"], title, link, published_str, is_initial=True)
+        saved = await db.add_post(member["id"], title, link, published_str, is_initial=True)
         added_links.add(link)
-        count += 1
+        if saved:
+            count += 1
 
     # 사이트맵으로 RSS가 놓친 과거 글 보완
     async with aiohttp.ClientSession() as session:
@@ -139,13 +140,14 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
                             except Exception:
                                 published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
-                        await db.add_post(
+                        saved = await db.add_post(
                             member["id"], title, link,
                             published_str,
                             is_initial=True
                         )
                         added_links.add(link)
-                        count += 1
+                        if saved:
+                            count += 1
         except Exception as e:
             logger.error("사이트맵 스캔 실패 [%s]: %s", member.get("discord_name", "?"), e)
 

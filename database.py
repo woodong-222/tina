@@ -22,11 +22,12 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
-                link TEXT UNIQUE NOT NULL,
+                link TEXT NOT NULL,
                 published_at DATETIME,
                 detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 is_initial INTEGER DEFAULT 0,
-                FOREIGN KEY (member_id) REFERENCES members(id)
+                FOREIGN KEY (member_id) REFERENCES members(id),
+                UNIQUE(member_id, link)
             )
         """)
 
@@ -51,6 +52,40 @@ async def init_db():
             )
         """)
 
+        await db.commit()
+
+    await _migrate_posts_if_needed()
+
+
+async def _migrate_posts_if_needed():
+    """posts 테이블의 UNIQUE 제약이 link 단독 → (member_id, link) 복합으로 변경되지 않은 경우 마이그레이션"""
+    async with aiosqlite.connect(Config.DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='posts'"
+        )
+        row = await cursor.fetchone()
+        if not row or "link TEXT UNIQUE" not in row[0]:
+            return  # 테이블이 없거나 이미 새 스키마
+
+        await db.execute("ALTER TABLE posts RENAME TO posts_old")
+        await db.execute("""
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                member_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                link TEXT NOT NULL,
+                published_at DATETIME,
+                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_initial INTEGER DEFAULT 0,
+                FOREIGN KEY (member_id) REFERENCES members(id),
+                UNIQUE(member_id, link)
+            )
+        """)
+        await db.execute("""
+            INSERT INTO posts (id, member_id, title, link, published_at, detected_at, is_initial)
+            SELECT id, member_id, title, link, published_at, detected_at, is_initial FROM posts_old
+        """)
+        await db.execute("DROP TABLE posts_old")
         await db.commit()
 
 
@@ -111,10 +146,10 @@ async def get_member_by_discord_id(guild_id: str, discord_id: str) -> dict | Non
 
 # ===== 포스팅 CRUD =====
 
-async def is_post_exists(link: str) -> bool:
+async def is_post_exists(link: str, member_id: int) -> bool:
     async with aiosqlite.connect(Config.DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT 1 FROM posts WHERE link = ?", (link,)
+            "SELECT 1 FROM posts WHERE link = ? AND member_id = ?", (link, member_id)
         )
         return await cursor.fetchone() is not None
 

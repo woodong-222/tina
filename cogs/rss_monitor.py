@@ -87,7 +87,7 @@ class RSSMonitor(commands.Cog):
             if not link:
                 continue
 
-            if await db.is_post_exists(link):
+            if await db.is_post_exists(link, member["id"]):
                 continue
 
             title = entry.get("title", "제목 없음").strip()
@@ -148,7 +148,7 @@ class RSSMonitor(commands.Cog):
                 feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
                 for entry in feed.entries:
                     link = entry.get("link", "").strip()
-                    if not link or await db.is_post_exists(link):
+                    if not link or await db.is_post_exists(link, member["id"]):
                         continue
 
                     title = entry.get("title", "제목 없음").strip()

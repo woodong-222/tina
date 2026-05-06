@@ -193,7 +193,7 @@ class Scheduler(commands.Cog):
 
                     for url_elem in url_elems:
                         link = url_elem.findtext(f"{NS}loc")
-                        if await db.is_post_exists(link):
+                        if await db.is_post_exists(link, member["id"]):
                             continue
 
                         # 페이지에서 제목과 실제 작성일을 함께 추출
