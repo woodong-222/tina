@@ -1,10 +1,13 @@
 import logging
 import logging.handlers
+import datetime
+from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands
 
 import database as db
 from config import Config
+from utils.embed_builder import bot_welcome_embed
 
 import os
 
@@ -13,20 +16,32 @@ log_level = logging.DEBUG if Config.BOT_MODE == "test" else logging.INFO
 os.makedirs("logs", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
-logging.basicConfig(
-    level=log_level,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+_KST = ZoneInfo("Asia/Seoul")
+
+
+class _KSTFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.datetime.fromtimestamp(record.created, tz=_KST)
+        return dt.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
+
+_formatter = _KSTFormatter(
+    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(),
-        logging.handlers.RotatingFileHandler(
-            "logs/tina.log", 
-            maxBytes=5*1024*1024,
-            backupCount=3,
-            encoding="utf-8"
-        )
-    ]
 )
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_formatter)
+
+_file_handler = logging.handlers.RotatingFileHandler(
+    "logs/tina.log",
+    maxBytes=5 * 1024 * 1024,
+    backupCount=3,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(_formatter)
+
+logging.basicConfig(level=log_level, handlers=[_stream_handler, _file_handler])
 logger = logging.getLogger("tina")
 
 # discord.py 내부 로그가 너무 많아지는 것을 방지 (테스트 모드라도 discord 라이브러리 자체는 INFO 유지)
@@ -87,20 +102,7 @@ class TinaBot(commands.Bot):
                     break
 
         if channel:
-            embed = discord.Embed(
-                title="안녕하세요! 저는 티나예요!",
-                description=(
-                    "블로그 포스팅을 자동으로 감지하고 알려주는 봇이에요.\n\n"
-                    "**시작하려면 아래 명령어를 사용해주세요:**\n"
-                    "1. `/채널설정 #채널` — 알림을 받을 채널 설정\n"
-                    "2. `/멤버등록 @유저 블로그URL` — 멤버 등록\n"
-                    "3. `/도움말` — 전체 사용법 보기\n\n"
-                    "등록 후 **1분마다** 새 글을 확인하고 알려드릴게요!"
-                ),
-                color=0x00D4AA
-            )
-            embed.set_footer(text="티나 • 블로그 포스팅 알림 봇")
-            await channel.send(embed=embed)
+            await channel.send(embed=bot_welcome_embed())
 
 
 def main():
@@ -110,7 +112,7 @@ def main():
         return
 
     bot = TinaBot()
-    bot.run(Config.DISCORD_TOKEN)
+    bot.run(Config.DISCORD_TOKEN, log_handler=None)
 
 
 if __name__ == "__main__":

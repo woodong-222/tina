@@ -3,8 +3,8 @@ import logging
 import feedparser
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime
-from utils.time_utils import get_kst_now
+from datetime import datetime, timezone
+from utils.time_utils import get_kst_now, KST
 
 import database as db
 from config import Config
@@ -93,8 +93,11 @@ class RSSMonitor(commands.Cog):
             title = entry.get("title", "제목 없음").strip()
 
             try:
-                published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
+                if entry.get("published_parsed"):
+                    utc_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    published_str = utc_dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -113,7 +116,7 @@ class RSSMonitor(commands.Cog):
                     link=link,
                     published_at=published_str
                 )
-                await channel.send(content=f"{mention}님이 새 글을 올렸어요!", embed=embed)
+                await channel.send(content=mention, embed=embed)
                 logger.info("새 글 감지: [%s] %s", member["discord_name"], title)
                 new_count += 1
 
@@ -133,7 +136,11 @@ class RSSMonitor(commands.Cog):
 
         channel = self.bot.get_channel(int(channel_id))
         if not channel:
-            return 0
+            try:
+                channel = await self.bot.fetch_channel(int(channel_id))
+            except Exception as e:
+                logger.error("새로고침 실패 - 알림 채널 접근 불가 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
+                return 0
 
         loop = asyncio.get_running_loop()
         for member in members:
@@ -146,8 +153,11 @@ class RSSMonitor(commands.Cog):
 
                     title = entry.get("title", "제목 없음").strip()
                     try:
-                        published_dt = datetime(*entry.published_parsed[:6]) if entry.get("published_parsed") else get_kst_now()
-                        published_str = published_dt.strftime("%Y-%m-%d %H:%M:%S")
+                        if entry.get("published_parsed"):
+                            utc_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                            published_str = utc_dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -155,7 +165,7 @@ class RSSMonitor(commands.Cog):
                     if saved:
                         mention = f"<@{member['discord_id']}>"
                         embed = new_post_embed(mention, title, link, published_str)
-                        await channel.send(content=f"{mention}님이 새 글을 올렸어요!", embed=embed)
+                        await channel.send(content=mention, embed=embed)
                         new_count += 1
             except Exception as e:
                 logger.error("수동 폴링 실패 [%s]: %s", member["discord_name"], e)

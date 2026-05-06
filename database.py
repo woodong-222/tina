@@ -75,10 +75,17 @@ async def add_member(guild_id: str, discord_id: str, discord_name: str, blog_url
 async def remove_member(guild_id: str, discord_id: str) -> bool:
     async with aiosqlite.connect(Config.DB_PATH) as db:
         cursor = await db.execute(
-            "DELETE FROM members WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id)
+            "SELECT id FROM members WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id)
         )
+        row = await cursor.fetchone()
+        if not row:
+            return False
+        member_id = row[0]
+        await db.execute("DELETE FROM posts WHERE member_id = ?", (member_id,))
+        await db.execute("DELETE FROM penalties WHERE member_id = ?", (member_id,))
+        await db.execute("DELETE FROM members WHERE id = ?", (member_id,))
         await db.commit()
-        return cursor.rowcount > 0
+        return True
 
 
 async def get_all_members(guild_id: str = None) -> list[dict]:
@@ -131,7 +138,7 @@ async def get_posts_in_range(member_id: int, start_date: str, end_date: str) -> 
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT * FROM posts
-               WHERE member_id = ? AND published_at >= ? AND published_at <= ? AND is_initial = 0
+               WHERE member_id = ? AND published_at >= ? AND published_at <= ?
                ORDER BY published_at DESC""",
             (member_id, start_date, end_date)
         )
@@ -143,7 +150,7 @@ async def get_post_count_in_range(member_id: int, start_date: str, end_date: str
     async with aiosqlite.connect(Config.DB_PATH) as db:
         cursor = await db.execute(
             """SELECT COUNT(*) FROM posts
-               WHERE member_id = ? AND published_at >= ? AND published_at <= ? AND is_initial = 0""",
+               WHERE member_id = ? AND published_at >= ? AND published_at <= ?""",
             (member_id, start_date, end_date)
         )
         row = await cursor.fetchone()

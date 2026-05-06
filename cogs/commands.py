@@ -14,7 +14,8 @@ from utils.embed_builder import (
     register_success_embed, unregister_success_embed,
     already_registered_embed, not_registered_embed,
     invalid_tistory_url_embed, no_members_embed,
-    system_error_embed, connection_error_embed
+    system_error_embed, connection_error_embed, post_list_embed,
+    COLOR_ADMIN
 )
 
 logger = logging.getLogger(__name__)
@@ -202,14 +203,21 @@ class Commands(commands.Cog):
 
         member = await db.get_member_by_discord_id(guild_id, str(유저.id))
         existing_count = 0
+        week_count = 0
+        month_count = 0
         if member:
             try:
                 existing_count = await scan_and_save_existing_posts(member, blog_url)
+                r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+                week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
+                month_start, month_end = get_month_range()
+                week_count = await db.get_post_count_in_range(member["id"], week_start, week_end)
+                month_count = await db.get_post_count_in_range(member["id"], month_start, month_end)
             except Exception as e:
                 logger.error("기존 글 스캔 실패 [%s]: %s", 유저.display_name, e)
 
-        await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count))
-        logger.info("본인 등록: %s (기존 글 %d편)", 유저.display_name, existing_count)
+        await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count, week_count, month_count))
+        logger.info("본인 등록: %s (기존 글 %d편, 이번주 %d편, 이번달 %d편)", 유저.display_name, existing_count, week_count, month_count)
 
     @app_commands.command(name="삭제", description="내 블로그 등록을 해제합니다")
     async def unregister_self(self, interaction: discord.Interaction):
@@ -222,6 +230,26 @@ class Commands(commands.Cog):
             await interaction.followup.send(embed=unregister_success_embed(유저.display_name))
         else:
             await interaction.followup.send(embed=not_registered_embed(), ephemeral=True)
+
+    @app_commands.command(name="조회", description="이번 주 포스팅 목록을 조회합니다")
+    @app_commands.describe(유저="조회할 유저")
+    async def post_list(self, interaction: discord.Interaction, 유저: discord.Member):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+
+        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
+        if not member:
+            await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
+            return
+
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
+
+        posts = await db.get_posts_in_range(member["id"], week_start, week_end)
+        week_range = format_date_range(week_start, week_end)
+
+        embed = post_list_embed(유저.display_name, week_range, posts, len(posts))
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
     async def list_members(self, interaction: discord.Interaction):
@@ -268,7 +296,7 @@ class Commands(commands.Cog):
             "초기화 시간 설정 완료",
             f"이 서버의 주간 초기화 및 벌금 정산 시간이 **{days[parsed_day]}요일 {hour:02d}:{minute:02d}** (으)로 변경되었어요!\n"
             f"마감 리마인드는 정확히 24시간 전인 **{days[(parsed_day-1)%7]}요일 {hour:02d}:{minute:02d}** 에 발송됩니다.",
-            color=0xF1C40F
+            color=COLOR_ADMIN
         )
         await interaction.followup.send(embed=embed)
 

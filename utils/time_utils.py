@@ -62,6 +62,13 @@ def get_month_range(dt: datetime = None) -> tuple[str, str]:
     return first_day.strftime("%Y-%m-%d 00:00:00"), last_day.strftime("%Y-%m-%d 23:59:59")
 
 
+def get_last_month_range() -> tuple[str, str]:
+    """지난 달의 1일 00:00:00 ~ 말일 23:59:59 범위를 반환"""
+    first_of_this_month = get_kst_now().replace(day=1)
+    last_day_of_prev_month = first_of_this_month - timedelta(days=1)
+    return get_month_range(last_day_of_prev_month)
+
+
 def format_date_range(start: str, end: str) -> str:
     """날짜 범위를 보기 좋게 포맷 (05/05 ~ 05/11)"""
     s_date = start.split(" ")[0]

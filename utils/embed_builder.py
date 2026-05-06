@@ -1,12 +1,39 @@
 import discord
 from utils.time_utils import format_date_range, get_kst_now
 
+_MAX_FIELD = 1024
+
+
+def _truncate_field(value: str) -> str:
+    if len(value) <= _MAX_FIELD:
+        return value
+    return value[: _MAX_FIELD - 5] + "\n..."
+
+
 # 색상 상수 정의
 COLOR_ERROR = 0xE74C3C    # 빨간색 (에러)
 COLOR_SUCCESS = 0x2ECC71  # 초록색 (일반 명령어 성공)
 COLOR_ADMIN = 0xF1C40F    # 노란색 (관리자 명령어 성공)
 COLOR_INFO = 0x3498DB     # 파란색 (주기적 알림/정보)
 COLOR_HELP = 0xFFB6C1     # 핑크색 (도움말)
+
+
+def bot_welcome_embed() -> discord.Embed:
+    """봇이 서버에 처음 입장했을 때 전송하는 환영 메시지"""
+    embed = discord.Embed(
+        title="안녕하세요! 저는 티나예요!",
+        description=(
+            "블로그 포스팅을 자동으로 감지하고 알려주는 봇이에요.\n\n"
+            "**시작하려면 아래 명령어를 사용해주세요:**\n"
+            "1. `/채널설정 #채널` — 알림을 받을 채널 설정\n"
+            "2. `/멤버신규등록 @유저 블로그URL` — 멤버 등록 (관리자 전용)\n"
+            "3. `/도움말` — 전체 사용법 보기"
+        ),
+        color=COLOR_SUCCESS,
+        timestamp=get_kst_now()
+    )
+    embed.set_footer(text="티나 • 블로그 포스팅 알림 봇")
+    return embed
 
 
 def new_post_embed(author_name: str, title: str, link: str, published_at: str) -> discord.Embed:
@@ -45,7 +72,8 @@ def weekly_report_embed(
     week_start: str,
     week_end: str,
     member_stats: list[dict],
-    penalty_amount: int
+    penalty_amount: int,
+    is_paused: bool = False,
 ) -> discord.Embed:
     """주간 리포트 Embed"""
     embed = discord.Embed(
@@ -60,29 +88,34 @@ def weekly_report_embed(
 
     for stat in member_stats:
         count = stat["post_count"]
-        name = stat["discord_name"]
-        name = stat.get("discord_name", "알 수 없음")
-
+        mention = f"<@{stat['discord_id']}>"
         posts = stat.get("posts", [])
 
         if count > 0:
-            report_lines.append(f"🟢 **{name}** — **{count}편** 작성")
-            for p in posts:
+            report_lines.append(f"🟢 {mention} — **{count}편** 작성")
+            for p in posts[:5]:
                 title = p["title"]
                 if len(title) > 30:
                     title = title[:27] + "..."
                 report_lines.append(f"　 ↳ [{title}]({p['link']})")
+            if count > 5:
+                report_lines.append(f"　 ↳ ... 외 {count - 5}편")
         else:
-            report_lines.append(f"🔴 **{name}** — **0편** (벌금 부과)")
-            penalty_members.append(f"**{name}**")
+            if is_paused:
+                report_lines.append(f"🔴 {mention} — **0편**")
+            else:
+                report_lines.append(f"🔴 {mention} — **0편** (벌금 부과)")
+                penalty_members.append(mention)
 
     embed.add_field(
         name="작성 현황",
-        value="\n".join(report_lines) if report_lines else "아무도 없네요 저 티나랑 놀아주세요",
+        value=_truncate_field("\n".join(report_lines) if report_lines else "아무도 없네요 저 티나랑 놀아주세요"),
         inline=False
     )
 
-    if penalty_members:
+    if is_paused:
+        embed.add_field(name="벌금 정지", value="이번 주는 벌금이 정지되었어요.", inline=False)
+    elif penalty_members:
         embed.add_field(
             name=f"벌금 대상 ({penalty_amount:,}원)",
             value=", ".join(penalty_members),
@@ -90,6 +123,34 @@ def weekly_report_embed(
         )
 
     embed.set_footer(text="티나 • 주간 리포트")
+
+    return embed
+
+
+def post_list_embed(
+    target_name: str,
+    week_range: str,
+    posts: list[dict],
+    week_count: int
+) -> discord.Embed:
+    """이번 주 포스팅 목록 Embed"""
+    embed = discord.Embed(
+        title=f"{target_name}님의 이번 주 포스팅 목록",
+        description=f"기간: {week_range}",
+        color=COLOR_SUCCESS,
+        timestamp=get_kst_now()
+    )
+
+    if not posts:
+        embed.add_field(name="포스팅 목록", value="이번 주 작성한 글이 없어요", inline=False)
+    else:
+        lines = []
+        for p in posts:
+            published_date = p["published_at"].split(" ")[0]
+            lines.append(f"[{p['title']}]({p['link']}) — {published_date}")
+        embed.add_field(name="포스팅 목록", value=_truncate_field("\n".join(lines)), inline=False)
+
+    embed.set_footer(text=f"티나 • 총 {week_count}편")
 
     return embed
 
@@ -198,7 +259,7 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
     """도움말 Embed"""
     embed = discord.Embed(
         title="📖 티나 도움말",
-        description=f"티나는 여러분들의 블로그 활동을 응원해요! 화이팅! 💖\n\n이 서버는 매주 **{reset_day} {reset_time}**에 주간 정산이 진행됩니다.",
+        description=f"티나는 여러분들의 블로그 활동을 응원해요! 화이팅! 💖\n\n이 서버는 매주 **{reset_day} {reset_time}**에 주간 정산이 진행됩니다.\n",
         color=COLOR_HELP,
         timestamp=get_kst_now()
     )
@@ -212,9 +273,10 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/현황 [@유저]` — 이번 주 작성 현황\n"
+            "`/조회 @유저` — 이번 주 포스팅 목록 조회\n"
             "`/벌금 [@유저]` — 벌금 현황 조회\n"
             "`/새로고침 [@유저]` — 최신 글 즉시 확인\n"
-            "`/도움말` — 이 도움말 표시"
+            "`/도움말` — 이 도움말 표시\n"
         ),
         inline=False
     )
@@ -222,10 +284,13 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
     embed.add_field(
         name="🔧 관리 명령어 (관리자 역할 필요)",
         value=(
-            "`/멤버신규등록 @유저 블로그URL` — 멤버 대리 등록\n"
-            "`/멤버삭제 @유저` — 멤버 대리 삭제\n"
-            "`/채널설정 #채널` — 알림 채널 변경\n"
-            "`/벌금설정 금액` — 벌금 금액 변경"
+            "`/멤버신규등록 [@유저] 블로그URL` — 멤버 대리 등록\n"
+            "`/멤버삭제 [@유저]` — 멤버 대리 삭제\n"
+            "`/채널설정 [#채널]` — 알림 채널 변경\n"
+            "`/벌금설정 [금액]` — 벌금 금액 변경\n"
+            "`/벌금정지` — 이번 주 벌금 부과 일시정지\n"
+            "`/벌금재개` — 벌금 부과 재개\n"
+            "`/벌금변경 [@유저] [금액]` — 벌금 수동 조정 (양수: 추가, 음수: 차감)\n"
         ),
         inline=False
     )
@@ -239,7 +304,7 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
         inline=False
     )
 
-    embed.set_footer(text="티나 • 도움말")
+    embed.set_footer(text="티나 • made by woo")
 
     return embed
 
@@ -322,6 +387,21 @@ def server_penalty_embed(penalties_by_member: list[dict], total_guild_penalty: i
     return embed
 
 
+def penalty_change_embed(member_mention: str, amount: int, new_total: int) -> discord.Embed:
+    """벌금 수동 조정 결과 Embed"""
+    action = "추가" if amount > 0 else "차감"
+    embed = discord.Embed(
+        title=f"벌금 {action} 완료",
+        description=f"{member_mention}님의 벌금이 수동으로 조정되었어요.",
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+    embed.add_field(name="조정 금액", value=f"**{amount:+,}원**", inline=True)
+    embed.add_field(name="변경 후 총 벌금", value=f"**{new_total:,}원**", inline=True)
+    embed.set_footer(text="티나 • 벌금 관리")
+    return embed
+
+
 def refresh_embed(target_str: str, new_count: int) -> discord.Embed:
     """새로고침 결과 Embed"""
     embed = discord.Embed(
@@ -359,7 +439,14 @@ def error_embed(description: str) -> discord.Embed:
     return embed
 
 
-def register_success_embed(user_mention: str, blog_url: str, existing_count: int, is_admin: bool = False) -> discord.Embed:
+def register_success_embed(
+    user_mention: str,
+    blog_url: str,
+    existing_count: int,
+    week_count: int = 0,
+    month_count: int = 0,
+    is_admin: bool = False,
+) -> discord.Embed:
     """등록 성공 알림 Embed"""
     embed = discord.Embed(
         title="등록 환영해요!" if not is_admin else "멤버 등록 완료!",
@@ -369,7 +456,33 @@ def register_success_embed(user_mention: str, blog_url: str, existing_count: int
     )
     embed.add_field(name="블로그", value=blog_url, inline=False)
     embed.add_field(name="기존 포스팅", value=f"{existing_count}편", inline=True)
+    embed.add_field(name="이번 주", value=f"{week_count}편", inline=True)
+    embed.add_field(name="이번 달", value=f"{month_count}편", inline=True)
     embed.set_footer(text="티나 • 멤버 등록")
+    return embed
+
+
+def monthly_report_embed(year: int, month: int, member_stats: list[dict]) -> discord.Embed:
+    """월간 리포트 Embed"""
+    embed = discord.Embed(
+        title=f"{year}년 {month}월 월간 블로그 리포트",
+        description="지난 한 달 동안 모두 고생 많으셨어요! 이번 달 최종 기록을 확인해볼게요.",
+        color=COLOR_INFO,
+        timestamp=get_kst_now()
+    )
+    lines = []
+    for stat in member_stats:
+        mention = f"<@{stat['discord_id']}>"
+        count = stat["post_count"]
+        icon = "🟢" if count > 0 else "🔴"
+        lines.append(f"{icon} {mention} — **{count}편**")
+
+    embed.add_field(
+        name="멤버별 작성 현황",
+        value="\n".join(lines) if lines else "아무도 없네요 저 티나랑 놀아주세요",
+        inline=False
+    )
+    embed.set_footer(text="티나 • 월간 리포트")
     return embed
 
 
@@ -386,6 +499,16 @@ def already_registered_embed(user_name: str = None) -> discord.Embed:
     """이미 등록된 경우 알림 Embed"""
     msg = f"**{user_name}**님은 이미 등록된 멤버예요!" if user_name else "이미 등록되어 있는 것 같아요!"
     return info_embed("등록 안내", msg, color=COLOR_SUCCESS)
+
+
+def admin_only_embed() -> discord.Embed:
+    """관리자 권한 부족 알림 Embed"""
+    return error_embed("이 명령어는 **서버 관리자** 권한이 필요해요.")
+
+
+def command_error_embed(error_msg: str) -> discord.Embed:
+    """명령어 오류 알림 Embed"""
+    return error_embed(f"오류가 발생했어요: {error_msg}")
 
 
 def not_registered_embed(user_name: str = None) -> discord.Embed:

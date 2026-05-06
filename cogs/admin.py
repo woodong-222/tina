@@ -5,11 +5,14 @@ from discord.ext import commands
 
 import database as db
 from utils.blog_utils import normalize_tistory_url, check_url_accessible, scan_and_save_existing_posts
+from utils.time_utils import get_week_range, get_month_range
 from utils.embed_builder import (
     status_embed, help_embed, member_list_embed,
     info_embed, error_embed, register_success_embed,
     already_registered_embed, not_registered_embed,
     invalid_tistory_url_embed, connection_error_embed,
+    admin_only_embed, command_error_embed,
+    penalty_change_embed,
     COLOR_ADMIN
 )
 
@@ -21,7 +24,7 @@ def is_admin():
     async def predicate(interaction: discord.Interaction) -> bool:
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(
-                "이 명령어는 **서버 관리자** 권한이 필요해요.",
+                embed=admin_only_embed(),
                 ephemeral=True
             )
             return False
@@ -60,14 +63,21 @@ class Admin(commands.Cog):
 
         member = await db.get_member_by_discord_id(guild_id, str(유저.id))
         existing_count = 0
+        week_count = 0
+        month_count = 0
         if member:
             try:
                 existing_count = await scan_and_save_existing_posts(member, blog_url)
+                r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+                week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
+                month_start, month_end = get_month_range()
+                week_count = await db.get_post_count_in_range(member["id"], week_start, week_end)
+                month_count = await db.get_post_count_in_range(member["id"], month_start, month_end)
             except Exception as e:
                 logger.error("기존 글 스캔 실패 [%s]: %s", 유저.display_name, e)
 
-        await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count, is_admin=True))
-        logger.info("멤버 등록: %s (기존 글 %d편)", 유저.display_name, existing_count)
+        await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count, week_count, month_count, is_admin=True))
+        logger.info("멤버 등록: %s (기존 글 %d편, 이번주 %d편, 이번달 %d편)", 유저.display_name, existing_count, week_count, month_count)
 
     @app_commands.command(name="멤버삭제", description="[관리자] 멤버를 삭제합니다")
     @app_commands.describe(유저="삭제할 디스코드 유저")
@@ -97,7 +107,10 @@ class Admin(commands.Cog):
     @is_admin()
     async def set_penalty(self, interaction: discord.Interaction, 금액: int):
         if 금액 < 0:
-            await interaction.response.send_message("벌금 금액은 0 이상이어야 해요.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=error_embed("벌금 금액은 0 이상이어야 해요."), 
+                ephemeral=True
+            )
             return
 
         guild_id = str(interaction.guild_id)
@@ -105,11 +118,67 @@ class Admin(commands.Cog):
         embed = info_embed("설정 완료", f"벌금 금액을 **{금액:,}원**으로 변경했어요! 다들 긴장해야겠는걸요?", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(name="벌금정지", description="[관리자] 이번 주 벌금 부과를 일시정지합니다")
+    @is_admin()
+    async def pause_penalty(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        await db.set_setting(guild_id, "penalty_paused", "1")
+
+        embed = info_embed("벌금 정지", "이번 주 벌금 부과가 일시정지되었어요.", color=COLOR_ADMIN)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="벌금재개", description="[관리자] 일시정지된 벌금 부과를 재개합니다")
+    @is_admin()
+    async def resume_penalty(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        await db.set_setting(guild_id, "penalty_paused", "0")
+
+        embed = info_embed("벌금 재개", "벌금 부과가 재개되었어요. 다들 이번 주도 파이팅!", color=COLOR_ADMIN)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="벌금변경", description="[관리자] 멤버 벌금을 수동으로 조정합니다")
+    @app_commands.describe(
+        유저="대상 유저",
+        금액="조정할 금액 (양수: 추가, 음수: 차감)"
+    )
+    @is_admin()
+    async def adjust_penalty(self, interaction: discord.Interaction, 유저: discord.Member, 금액: int):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+
+        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
+        if not member:
+            await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
+            return
+
+        if 금액 == 0:
+            await interaction.followup.send(embed=error_embed("0원은 조정할 수 없어요."), ephemeral=True)
+            return
+
+        current_total = await db.get_total_penalty(member["id"])
+        if 금액 < 0 and current_total + 금액 < 0:
+            await interaction.followup.send(
+                embed=error_embed(f"차감 후 총 벌금이 음수가 됩니다. (현재: {current_total:,}원, 차감: {abs(금액):,}원)"),
+                ephemeral=True
+            )
+            return
+
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
+        await db.add_penalty(member["id"], week_start, week_end, 금액)
+
+        new_total = await db.get_total_penalty(member["id"])
+        await interaction.followup.send(embed=penalty_change_embed(유저.mention, 금액, new_total))
+        logger.info("벌금 수동 조정: %s (%+d원 → 총 %d원)", 유저.display_name, 금액, new_total)
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure):
             pass
         else:
-            await interaction.response.send_message(f"오류가 발생했어요: {error}", ephemeral=True)
+            await interaction.response.send_message(
+                embed=command_error_embed(str(error)), 
+                ephemeral=True
+            )
 
 
 async def setup(bot: commands.Bot):
