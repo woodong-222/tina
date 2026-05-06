@@ -165,6 +165,7 @@ class Commands(commands.Cog):
         target_str = f"**{유저.display_name}**님의 " if 유저 else "모든 멤버의 "
         embed = refresh_embed(target_str, new_count)
         await interaction.followup.send(embed=embed)
+        logger.info("새로고침: %s→ 새 글 %d건 감지 (Guild: %s)", target_str, new_count, guild_id)
 
     @app_commands.command(name="도움말", description="티나 사용법을 안내합니다")
     async def help_command(self, interaction: discord.Interaction):
@@ -228,6 +229,7 @@ class Commands(commands.Cog):
 
         if success:
             await interaction.followup.send(embed=unregister_success_embed(유저.display_name))
+            logger.info("본인 삭제: %s (Guild: %s)", 유저.display_name, guild_id)
         else:
             await interaction.followup.send(embed=not_registered_embed(), ephemeral=True)
 
@@ -248,6 +250,7 @@ class Commands(commands.Cog):
         posts = await db.get_posts_in_range(member["id"], week_start, week_end)
         week_range = format_date_range(week_start, week_end)
 
+        logger.debug("조회: [%s] 이번 주 %d편 (Guild: %s)", 유저.display_name, len(posts), guild_id)
         embed = post_list_embed(유저.display_name, week_range, posts, len(posts))
         await interaction.followup.send(embed=embed)
 

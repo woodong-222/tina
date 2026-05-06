@@ -88,6 +88,8 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
     added_links: set[str] = set()
     count = 0
 
+    logger.debug("기존 글 스캔 시작: [%s] %s", member.get("discord_name", "?"), blog_url)
+
     # feedparser는 동기 라이브러리이므로 이벤트 루프를 블로킹하지 않도록 executor에서 실행
     loop = asyncio.get_running_loop()
     feed = await loop.run_in_executor(None, feedparser.parse, rss_url)
@@ -109,6 +111,8 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
         added_links.add(link)
         if saved:
             count += 1
+
+    logger.debug("RSS 스캔 완료: [%s] %d편", member.get("discord_name", "?"), count)
 
     # 사이트맵으로 RSS가 놓친 과거 글 보완
     async with aiohttp.ClientSession() as session:
@@ -151,4 +155,5 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
         except Exception as e:
             logger.error("사이트맵 스캔 실패 [%s]: %s", member.get("discord_name", "?"), e)
 
+    logger.debug("스캔 완료: [%s] 총 %d편 저장", member.get("discord_name", "?"), count)
     return count

@@ -90,6 +90,7 @@ class Admin(commands.Cog):
         if success:
             embed = info_embed("멤버 삭제 완료", f"**{유저.display_name}**님이 목록에서 삭제되었어요.", color=COLOR_ADMIN)
             await interaction.followup.send(embed=embed)
+            logger.info("멤버 삭제: %s (Guild: %s)", 유저.display_name, guild_id)
         else:
             await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
 
@@ -101,6 +102,7 @@ class Admin(commands.Cog):
         await db.set_setting(guild_id, "notification_channel_id", str(채널.id))
         embed = info_embed("설정 완료", f"알림 채널을 {채널.mention}으로 설정했어요! 이제 이곳에서 소식을 전해드릴게요.", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
+        logger.info("알림 채널 설정: #%s (Guild: %s)", 채널.name, guild_id)
 
     @app_commands.command(name="벌금설정", description="[관리자] 벌금 금액을 변경합니다")
     @app_commands.describe(금액="벌금 금액 (원)")
@@ -117,6 +119,7 @@ class Admin(commands.Cog):
         await db.set_setting(guild_id, "penalty_amount", str(금액))
         embed = info_embed("설정 완료", f"벌금 금액을 **{금액:,}원**으로 변경했어요! 다들 긴장해야겠는걸요?", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
+        logger.info("벌금 금액 설정: %d원 (Guild: %s)", 금액, guild_id)
 
     @app_commands.command(name="벌금정지", description="[관리자] 이번 주 벌금 부과를 일시정지합니다")
     @is_admin()
@@ -126,6 +129,7 @@ class Admin(commands.Cog):
 
         embed = info_embed("벌금 정지", "이번 주 벌금 부과가 일시정지되었어요.", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
+        logger.info("벌금 정지 (Guild: %s)", guild_id)
 
     @app_commands.command(name="벌금재개", description="[관리자] 일시정지된 벌금 부과를 재개합니다")
     @is_admin()
@@ -135,6 +139,7 @@ class Admin(commands.Cog):
 
         embed = info_embed("벌금 재개", "벌금 부과가 재개되었어요. 다들 이번 주도 파이팅!", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
+        logger.info("벌금 재개 (Guild: %s)", guild_id)
 
     @app_commands.command(name="벌금변경", description="[관리자] 멤버 벌금을 수동으로 조정합니다")
     @app_commands.describe(

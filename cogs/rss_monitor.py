@@ -87,7 +87,10 @@ class RSSMonitor(commands.Cog):
             if not link:
                 continue
 
+            logger.debug("RSS 항목 확인: [%s] %s", member["discord_name"], link)
+
             if await db.is_post_exists(link, member["id"]):
+                logger.debug("이미 저장된 글 건너뜀: [%s] %s", member["discord_name"], link)
                 continue
 
             title = entry.get("title", "제목 없음").strip()
@@ -124,10 +127,11 @@ class RSSMonitor(commands.Cog):
 
     async def manual_poll(self, guild_id: str, target_discord_id: str = None) -> int:
         """수동 폴링 (명령어에서 호출). 감지한 새 글 수를 반환."""
+        logger.info("수동 폴링 시작 [Guild: %s] (대상: %s)", guild_id, target_discord_id or "전체")
         members = await db.get_all_members(guild_id)
         if target_discord_id:
             members = [m for m in members if m["discord_id"] == target_discord_id]
-            
+
         new_count = 0
 
         channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
@@ -145,6 +149,7 @@ class RSSMonitor(commands.Cog):
         loop = asyncio.get_running_loop()
         for member in members:
             try:
+                logger.debug("수동 폴링 중: [%s] %s", member["discord_name"], member["rss_url"])
                 feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
                 for entry in feed.entries:
                     link = entry.get("link", "").strip()
@@ -195,9 +200,9 @@ class RSSMonitor(commands.Cog):
             members = await db.get_all_members(guild_id)
             member_names = [m['discord_name'] for m in members]
             
-            logger.info(f" 서버 : {guild_name}")
-            logger.info(f" 채널 : {channel_name}")
-            logger.info(f" 멤버 : {', '.join(member_names) if member_names else '없음'} ({len(members)}명)")
+            logger.info(" 서버 : %s", guild_name)
+            logger.info(" 채널 : %s", channel_name)
+            logger.info(" 멤버 : %s (%d명)", ", ".join(member_names) if member_names else "없음", len(members))
             logger.info("├──────────────────────────────────────────┤")
             
         logger.info("└──────────────────────────────────────────┘")

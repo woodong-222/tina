@@ -175,6 +175,7 @@ class Scheduler(commands.Cog):
             sitemap_url = f"{blog_url}/sitemap.xml"
 
             try:
+                logger.debug("사이트맵 스캔 중: [%s] %s", member["discord_name"], sitemap_url)
                 async with session.get(sitemap_url, timeout=10) as resp:
                     if resp.status != 200:
                         continue
@@ -194,6 +195,7 @@ class Scheduler(commands.Cog):
                     for url_elem in url_elems:
                         link = url_elem.findtext(f"{NS}loc")
                         if await db.is_post_exists(link, member["id"]):
+                            logger.debug("이미 저장된 글 건너뜀: [%s] %s", member["discord_name"], link)
                             continue
 
                         # 페이지에서 제목과 실제 작성일을 함께 추출
