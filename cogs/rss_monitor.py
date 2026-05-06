@@ -119,7 +119,7 @@ class RSSMonitor(commands.Cog):
                     link=link,
                     published_at=published_str
                 )
-                await channel.send(content=mention, embed=embed)
+                await channel.send(embed=embed)
                 logger.info("새 글 감지: [%s] %s", member["discord_name"], title)
                 new_count += 1
 
@@ -170,7 +170,7 @@ class RSSMonitor(commands.Cog):
                     if saved:
                         mention = f"<@{member['discord_id']}>"
                         embed = new_post_embed(mention, title, link, published_str)
-                        await channel.send(content=mention, embed=embed)
+                        await channel.send(embed=embed)
                         new_count += 1
             except Exception as e:
                 logger.error("수동 폴링 실패 [%s]: %s", member["discord_name"], e)

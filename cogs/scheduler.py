@@ -237,7 +237,7 @@ class Scheduler(commands.Cog):
                                 link=link,
                                 published_at=published_str
                             )
-                            await channel.send(content=mention, embed=embed)
+                            await channel.send(embed=embed)
                             logger.info("누락 글 감지 및 추가: [%s] %s", member["discord_name"], title)
             except Exception as e:
                 logger.error("사이트맵 파싱 오류 [%s]: %s", member["discord_name"], e)
