@@ -138,9 +138,8 @@ class Scheduler(commands.Cog):
         if not members_without_posts:
             return
 
-        mentions = " ".join([f"<@{m['discord_id']}>" for m in members_without_posts])
         embed = remind_embed(members_without_posts)
-        await channel.send(content=f"{mentions}", embed=embed)
+        await channel.send(embed=embed)
         logger.info("리마인드 발송 완료 [Guild: %s] (대상: %d명)", guild_id, len(members_without_posts))
 
     @tasks.loop(time=SCAN_TIME)
