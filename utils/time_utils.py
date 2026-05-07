@@ -6,6 +6,8 @@ KST = ZoneInfo("Asia/Seoul")
 def get_kst_now() -> datetime:
     """한국 시간(KST) 기준 현재 시간을 반환합니다."""
     return datetime.now(KST)
+
+
 def get_week_range(dt: datetime = None, reset_weekday: int = 0, reset_hour: int = 9, reset_minute: int = 0) -> tuple[str, str]:
     """해당 날짜가 속한 주의 설정된 요일/시간 ~ 다음 주 요일/시간-1초 범위를 반환"""
     if dt is None:

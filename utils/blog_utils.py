@@ -26,7 +26,7 @@ async def check_url_accessible(url: str) -> tuple[bool, int | None]:
     """URL 접근 가능 여부 확인. (성공여부, HTTP상태코드) 반환."""
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 return resp.status == 200, resp.status
         except Exception:
             return False, None
@@ -51,24 +51,13 @@ def parse_published_at_from_html(html: str) -> str | None:
     return None
 
 
-async def fetch_post_published_at(session: aiohttp.ClientSession, url: str) -> str | None:
-    """포스트 URL에서 실제 작성일(article:published_time)을 추출. 실패 시 None 반환."""
-    try:
-        async with session.get(url, timeout=5) as resp:
-            if resp.status != 200:
-                return None
-            return parse_published_at_from_html(await resp.text())
-    except Exception:
-        pass
-    return None
-
 
 async def fetch_post_meta(session: aiohttp.ClientSession, url: str) -> tuple[str, str | None]:
     """포스트 URL에서 제목과 작성일을 한 번의 요청으로 추출. (title, published_at | None) 반환."""
     title = "이전 글"
     published_str = None
     try:
-        async with session.get(url, timeout=5) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             if resp.status == 200:
                 html = await resp.text()
                 title_match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', html, re.IGNORECASE)
@@ -117,7 +106,7 @@ async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
     # 사이트맵으로 RSS가 놓친 과거 글 보완
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(sitemap_url, timeout=10) as resp:
+            async with session.get(sitemap_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)

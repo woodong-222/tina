@@ -9,7 +9,7 @@ import re
 import database as db
 from utils.time_utils import get_week_range, get_last_week_range, get_last_month_range, get_kst_now, KST
 from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_embed, monthly_report_embed
-from utils.blog_utils import fetch_post_published_at, parse_published_at_from_html
+from utils.blog_utils import parse_published_at_from_html, _IGNORE_PATTERNS
 
 logger = logging.getLogger(__name__)
 
@@ -175,18 +175,17 @@ class Scheduler(commands.Cog):
 
             try:
                 logger.debug("사이트맵 스캔 중: [%s] %s", member["discord_name"], sitemap_url)
-                async with session.get(sitemap_url, timeout=10) as resp:
+                async with session.get(sitemap_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
                         continue
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
                     
                     NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
-                    ignore_patterns = ('/category', '/tag', '/guestbook', '/manage')
                     url_elems = [
                         elem for elem in root.findall(f"{NS}url")
                         if (loc := elem.findtext(f"{NS}loc"))
-                        and not any(p in loc for p in ignore_patterns)
+                        and not any(p in loc for p in _IGNORE_PATTERNS)
                         and "/m/" not in loc
                         and loc != blog_url
                     ]
@@ -201,7 +200,7 @@ class Scheduler(commands.Cog):
                         title = "누락된 블로그 포스팅"
                         published_str = None
                         try:
-                            async with session.get(link, timeout=5) as post_resp:
+                            async with session.get(link, timeout=aiohttp.ClientTimeout(total=5)) as post_resp:
                                 if post_resp.status == 200:
                                     html = await post_resp.text()
                                     title_match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', html, re.IGNORECASE)
