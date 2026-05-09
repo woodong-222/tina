@@ -40,7 +40,7 @@ def new_post_embed(author_name: str, title: str, link: str, published_at: str) -
     """새 블로그 글 알림 Embed"""
     embed = discord.Embed(
         title="새 블로그 글이 올라왔어요!",
-        description="우리 멤버가 새로운 글을 발행했어요! 얼른 가서 읽어볼까요?",
+        description="읽고 나서 댓글 하나씩 꼭 달아주세요!\n글쓴이에게 큰 힘이 된답니다 💬",
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )

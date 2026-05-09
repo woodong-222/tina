@@ -40,6 +40,37 @@ class Scheduler(commands.Cog):
         self.daily_sitemap_scan.cancel()
         self.monthly_report_task.cancel()
 
+    async def _resolve_channel(self, guild_id: str) -> discord.TextChannel | None:
+        """알림 채널 반환. 설정된 채널이 없거나 삭제됐으면 position 순 첫 번째 채널로 폴백."""
+        guild = self.bot.get_guild(int(guild_id))
+        if not guild:
+            return None
+
+        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
+        if channel_id:
+            channel = self.bot.get_channel(int(channel_id))
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(int(channel_id))
+                except discord.NotFound:
+                    logger.warning("알림 채널이 삭제됨 - 폴백 채널 탐색 [Guild: %s]", guild_id)
+                    channel = None
+                except Exception as e:
+                    logger.warning("알림 채널 접근 실패 - 폴백 채널 탐색 [Guild: %s]: %s", guild_id, e)
+                    channel = None
+            if channel:
+                return channel
+
+        fallback = next(
+            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages),
+            None,
+        )
+        if fallback:
+            logger.info("폴백 채널로 알림 발송 [Guild: %s, Channel: #%s]", guild_id, fallback.name)
+        else:
+            logger.error("알림 발송 가능한 채널 없음 [Guild: %s]", guild_id)
+        return fallback
+
     @tasks.loop(minutes=1)
     async def main_scheduler(self):
         """매 분마다 실행되며, 각 서버의 초기화/리마인드 시간에 도달했는지 확인"""
@@ -65,18 +96,9 @@ class Scheduler(commands.Cog):
                 logger.error("메인 스케줄러 오류 [Guild: %s]: %s", guild_id, e)
 
     async def _send_weekly_report(self, guild_id: str, r_day: int, r_hour: int, r_min: int):
-        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-        if not channel_id:
-            logger.warning("주간 리포트 미발송 - 알림 채널 미설정 [Guild: %s] /채널설정 명령어를 실행해주세요", guild_id)
-            return
-
-        channel = self.bot.get_channel(int(channel_id))
+        channel = await self._resolve_channel(guild_id)
         if not channel:
-            try:
-                channel = await self.bot.fetch_channel(int(channel_id))
-            except Exception as e:
-                logger.error("주간 리포트 미발송 - 알림 채널 접근 불가 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
-                return
+            return
 
         week_start, week_end = get_last_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
@@ -113,18 +135,9 @@ class Scheduler(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _send_remind(self, guild_id: str, r_day: int, r_hour: int, r_min: int):
-        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-        if not channel_id:
-            logger.warning("리마인드 미발송 - 알림 채널 미설정 [Guild: %s]", guild_id)
-            return
-
-        channel = self.bot.get_channel(int(channel_id))
+        channel = await self._resolve_channel(guild_id)
         if not channel:
-            try:
-                channel = await self.bot.fetch_channel(int(channel_id))
-            except Exception as e:
-                logger.error("리마인드 미발송 - 알림 채널 접근 불가 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
-                return
+            return
 
         week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
@@ -156,17 +169,9 @@ class Scheduler(commands.Cog):
                     logger.error("사이트맵 스캔 실패 [Guild: %s]: %s", guild_id, e)
 
     async def _scan_sitemap_for_guild(self, session: aiohttp.ClientSession, guild_id: str):
-        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-        if not channel_id:
-            return
-
-        channel = self.bot.get_channel(int(channel_id))
+        channel = await self._resolve_channel(guild_id)
         if not channel:
-            try:
-                channel = await self.bot.fetch_channel(int(channel_id))
-            except Exception as e:
-                logger.error("사이트맵 스캔 알림 불가 - 채널 접근 실패 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
-                return
+            return
 
         members = await db.get_all_members(guild_id)
         for member in members:
@@ -260,18 +265,9 @@ class Scheduler(commands.Cog):
                 logger.error("월간 리포트 발송 실패 [Guild: %s]: %s", guild_id, e)
 
     async def _send_monthly_report(self, guild_id: str, now):
-        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-        if not channel_id:
-            logger.warning("월간 리포트 미발송 - 알림 채널 미설정 [Guild: %s]", guild_id)
-            return
-
-        channel = self.bot.get_channel(int(channel_id))
+        channel = await self._resolve_channel(guild_id)
         if not channel:
-            try:
-                channel = await self.bot.fetch_channel(int(channel_id))
-            except Exception as e:
-                logger.error("월간 리포트 미발송 - 알림 채널 접근 불가 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
-                return
+            return
 
         month_start, month_end = get_last_month_range()
         # 지난 달 (1일 기준 → 전달)

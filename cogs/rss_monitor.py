@@ -31,6 +31,32 @@ class RSSMonitor(commands.Cog):
     def cog_unload(self):
         self.poll_rss.cancel()
 
+    async def _resolve_channel(self, guild_id: str) -> discord.TextChannel | None:
+        """알림 채널 반환. 설정된 채널이 없거나 삭제됐으면 position 순 첫 번째 채널로 폴백."""
+        guild = self.bot.get_guild(int(guild_id))
+        if not guild:
+            return None
+
+        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
+        if channel_id:
+            channel = self.bot.get_channel(int(channel_id))
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(int(channel_id))
+                except discord.NotFound:
+                    logger.warning("알림 채널이 삭제됨 - 폴백 채널 탐색 [Guild: %s]", guild_id)
+                    channel = None
+                except Exception as e:
+                    logger.warning("알림 채널 접근 실패 - 폴백 채널 탐색 [Guild: %s]: %s", guild_id, e)
+                    channel = None
+            if channel:
+                return channel
+
+        return next(
+            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages),
+            None,
+        )
+
     @tasks.loop(minutes=Config.RSS_POLL_INTERVAL)
     async def poll_rss(self):
         """등록된 모든 서버의 멤버 RSS 피드를 확인하여 새 글을 감지"""
@@ -42,14 +68,8 @@ class RSSMonitor(commands.Cog):
         logger.debug("RSS 폴링 동작 확인 중... (총 %d개 서버 스캔)", len(guild_ids))
 
         for guild_id in guild_ids:
-            channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-            if not channel_id:
-                logger.debug("서버(%s): 알림 채널 미설정으로 스킵", guild_id)
-                continue
-
-            channel = self.bot.get_channel(int(channel_id))
+            channel = await self._resolve_channel(guild_id)
             if not channel:
-                logger.debug("서버(%s): 알림 채널을 찾을 수 없음 스킵", guild_id)
                 continue
 
             members = await db.get_all_members(guild_id)
@@ -134,17 +154,9 @@ class RSSMonitor(commands.Cog):
 
         new_count = 0
 
-        channel_id = await db.get_setting("notification_channel_id", guild_id=guild_id)
-        if not channel_id:
-            return 0
-
-        channel = self.bot.get_channel(int(channel_id))
+        channel = await self._resolve_channel(guild_id)
         if not channel:
-            try:
-                channel = await self.bot.fetch_channel(int(channel_id))
-            except Exception as e:
-                logger.error("새로고침 실패 - 알림 채널 접근 불가 [Guild: %s, Channel: %s]: %s", guild_id, channel_id, e)
-                return 0
+            return 0
 
         loop = asyncio.get_running_loop()
         for member in members:

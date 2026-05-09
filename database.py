@@ -287,3 +287,17 @@ async def get_all_guild_ids() -> list[str]:
         cursor = await db.execute("SELECT DISTINCT guild_id FROM members")
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+
+async def delete_all_guild_data(guild_id: str):
+    """길드의 모든 데이터 삭제 (포스팅 → 벌금 → 멤버 → 설정 순)"""
+    async with aiosqlite.connect(Config.DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM posts WHERE member_id IN (SELECT id FROM members WHERE guild_id = ?)", (guild_id,)
+        )
+        await db.execute(
+            "DELETE FROM penalties WHERE member_id IN (SELECT id FROM members WHERE guild_id = ?)", (guild_id,)
+        )
+        await db.execute("DELETE FROM members WHERE guild_id = ?", (guild_id,))
+        await db.execute("DELETE FROM settings WHERE guild_id = ?", (guild_id,))
+        await db.commit()
