@@ -13,26 +13,13 @@ def get_week_range(dt: datetime = None, reset_weekday: int = 0, reset_hour: int 
     if dt is None:
         dt = get_kst_now()
 
-    # 현재 시간이 지정된 요일/시간 이전이면, 개념상 지난주에 속함
-    # 요일 비교 시, 현재 요일이 리셋 요일보다 작으면 무조건 지난 주
-    # 현재 요일과 리셋 요일이 같고, 현재 시간이 리셋 시간보다 작으면 지난 주
-    is_previous_week = False
-    if dt.weekday() < reset_weekday:
-        is_previous_week = True
-    elif dt.weekday() == reset_weekday:
+    days_since_reset = (dt.weekday() - reset_weekday) % 7
+
+    if days_since_reset == 0:
         if dt.hour < reset_hour or (dt.hour == reset_hour and dt.minute < reset_minute):
-            is_previous_week = True
+            days_since_reset = 7
 
-    if is_previous_week:
-        base_dt = dt - timedelta(days=7)
-    else:
-        base_dt = dt
-
-    # 해당 주의 시작 요일로 이동
-    days_to_subtract = (base_dt.weekday() - reset_weekday) % 7
-    start_date = base_dt - timedelta(days=days_to_subtract)
-    
-    # 시간 설정
+    start_date = dt - timedelta(days=days_since_reset)
     start_dt = start_date.replace(hour=reset_hour, minute=reset_minute, second=0, microsecond=0)
     end_dt = start_dt + timedelta(days=7) - timedelta(seconds=1)
 

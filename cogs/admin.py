@@ -22,9 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_pause_until(date_str: str) -> datetime | None:
-    """날짜 문자열을 KST datetime으로 파싱. 실패 시 None 반환.
-    지원 형식: '5월 11일 09:00' / '5/11 09:00' / '2026-05-11 09:00'
-    """
     year = get_kst_now().year
     s = date_str.strip()
 
