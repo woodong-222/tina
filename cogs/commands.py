@@ -61,12 +61,19 @@ class Commands(commands.Cog):
 
             member_stats = []
             for member in members:
+                guild_member = interaction.guild.get_member(int(member["discord_id"]))
+                display_name = member["discord_name"]
+                if guild_member:
+                    display_name = guild_member.display_name
+                    if display_name != member["discord_name"]:
+                        await db.update_discord_name(member["id"], display_name)
+
                 week_count = await db.get_post_count_in_range(member["id"], week_start, week_end)
                 month_count = await db.get_post_count_in_range(member["id"], month_start, month_end)
                 total_penalty = await db.get_total_penalty(member["id"])
                 member_stats.append({
                     "discord_id": member["discord_id"],
-                    "discord_name": member["discord_name"],
+                    "discord_name": display_name,
                     "week_count": week_count,
                     "month_count": month_count,
                     "total_penalty": total_penalty
@@ -105,11 +112,18 @@ class Commands(commands.Cog):
             penalties_by_member = []
             total_guild_penalty = 0
             for member in members:
+                guild_member = interaction.guild.get_member(int(member["discord_id"]))
+                display_name = member["discord_name"]
+                if guild_member:
+                    display_name = guild_member.display_name
+                    if display_name != member["discord_name"]:
+                        await db.update_discord_name(member["id"], display_name)
+
                 total_p = await db.get_total_penalty(member["id"])
                 if total_p > 0:
                     penalties_by_member.append({
                         "discord_id": member["discord_id"],
-                        "discord_name": member["discord_name"],
+                        "discord_name": display_name,
                         "total_penalty": total_p
                     })
                     total_guild_penalty += total_p
@@ -218,10 +232,17 @@ class Commands(commands.Cog):
 
             member_stats = []
             for member in members:
+                guild_member = interaction.guild.get_member(int(member["discord_id"]))
+                display_name = member["discord_name"]
+                if guild_member:
+                    display_name = guild_member.display_name
+                    if display_name != member["discord_name"]:
+                        await db.update_discord_name(member["id"], display_name)
+
                 count = await db.get_post_count_in_range(member["id"], week_start, week_end)
                 member_stats.append({
                     "discord_id": member["discord_id"],
-                    "discord_name": member["discord_name"],
+                    "discord_name": display_name,
                     "post_count": count
                 })
 
@@ -245,6 +266,15 @@ class Commands(commands.Cog):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
         members = await db.get_all_members(guild_id)
+
+        for member in members:
+            guild_member = interaction.guild.get_member(int(member["discord_id"]))
+            if guild_member:
+                display_name = guild_member.display_name
+                if display_name != member["discord_name"]:
+                    await db.update_discord_name(member["id"], display_name)
+                    member["discord_name"] = display_name
+
         embed = member_list_embed(members)
         await interaction.followup.send(embed=embed)
 

@@ -134,6 +134,15 @@ async def get_all_members(guild_id: str = None) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+async def update_discord_name(member_id: int, new_name: str):
+    async with aiosqlite.connect(Config.DB_PATH) as db:
+        await db.execute(
+            "UPDATE members SET discord_name = ? WHERE id = ?",
+            (new_name, member_id)
+        )
+        await db.commit()
+
+
 async def get_member_by_discord_id(guild_id: str, discord_id: str) -> dict | None:
     async with aiosqlite.connect(Config.DB_PATH) as db:
         db.row_factory = aiosqlite.Row
