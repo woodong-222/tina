@@ -79,37 +79,6 @@ class Commands(commands.Cog):
             )
             await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="현황", description="이번 주 작성 현황을 확인합니다")
-    @app_commands.describe(유저="확인할 유저 (미입력 시 전체)")
-    async def status(self, interaction: discord.Interaction, 유저: discord.Member = None):
-        await interaction.response.defer()
-        guild_id = str(interaction.guild_id)
-        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
-        week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
-        members = await db.get_all_members(guild_id)
-
-        if not members:
-            await interaction.followup.send(embed=no_members_embed(is_status=True), ephemeral=True)
-            return
-
-        if 유저:
-            members = [m for m in members if m["discord_id"] == str(유저.id)]
-            if not members:
-                await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
-                return
-
-        member_stats = []
-        for member in members:
-            count = await db.get_post_count_in_range(member["id"], week_start, week_end)
-            member_stats.append({
-                "discord_id": member["discord_id"],
-                "discord_name": member["discord_name"],
-                "post_count": count
-            })
-
-        embed = status_embed(week_start, week_end, member_stats)
-        await interaction.followup.send(embed=embed)
-
     @app_commands.command(name="벌금", description="벌금 현황을 조회합니다")
     @app_commands.describe(유저="조회할 유저 (미입력 시 전체)")
     async def penalty(self, interaction: discord.Interaction, 유저: discord.Member = None):
@@ -233,26 +202,43 @@ class Commands(commands.Cog):
         else:
             await interaction.followup.send(embed=not_registered_embed(), ephemeral=True)
 
-    @app_commands.command(name="조회", description="이번 주 포스팅 목록을 조회합니다")
-    @app_commands.describe(유저="조회할 유저")
-    async def post_list(self, interaction: discord.Interaction, 유저: discord.Member):
+    @app_commands.command(name="조회", description="이번 주 현황 및 포스팅 목록을 조회합니다")
+    @app_commands.describe(유저="조회할 유저 (미입력 시 전체 현황)")
+    async def post_list(self, interaction: discord.Interaction, 유저: discord.Member = None):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
-
-        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
-        if not member:
-            await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
-            return
-
         r_day, r_hour, r_min = await db.get_reset_time(guild_id)
         week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
 
-        posts = await db.get_posts_in_range(member["id"], week_start, week_end)
-        week_range = format_date_range(week_start, week_end)
+        if 유저 is None:
+            members = await db.get_all_members(guild_id)
+            if not members:
+                await interaction.followup.send(embed=no_members_embed(is_status=True), ephemeral=True)
+                return
 
-        logger.debug("조회: [%s] 이번 주 %d편 (Guild: %s)", 유저.display_name, len(posts), guild_id)
-        embed = post_list_embed(유저.display_name, week_range, posts, len(posts))
-        await interaction.followup.send(embed=embed)
+            member_stats = []
+            for member in members:
+                count = await db.get_post_count_in_range(member["id"], week_start, week_end)
+                member_stats.append({
+                    "discord_id": member["discord_id"],
+                    "discord_name": member["discord_name"],
+                    "post_count": count
+                })
+
+            embed = status_embed(week_start, week_end, member_stats)
+            await interaction.followup.send(embed=embed)
+        else:
+            member = await db.get_member_by_discord_id(guild_id, str(유저.id))
+            if not member:
+                await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
+                return
+
+            posts = await db.get_posts_in_range(member["id"], week_start, week_end)
+            week_range = format_date_range(week_start, week_end)
+
+            logger.debug("조회: [%s] 이번 주 %d편 (Guild: %s)", 유저.display_name, len(posts), guild_id)
+            embed = post_list_embed(유저.display_name, week_range, posts, len(posts))
+            await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
     async def list_members(self, interaction: discord.Interaction):

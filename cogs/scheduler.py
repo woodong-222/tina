@@ -108,6 +108,18 @@ class Scheduler(commands.Cog):
 
         is_paused = await db.get_setting("penalty_paused", default="0", guild_id=guild_id) == "1"
 
+        if not is_paused:
+            paused_until_str = await db.get_setting("penalty_paused_until", default="", guild_id=guild_id)
+            if paused_until_str:
+                try:
+                    paused_until = datetime.strptime(paused_until_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
+                    if get_kst_now() <= paused_until:
+                        is_paused = True
+                    else:
+                        await db.set_setting(guild_id, "penalty_paused_until", "")
+                except Exception:
+                    pass
+
         member_stats = []
         for member in members:
             posts = await db.get_posts_in_range(member["id"], week_start, week_end)

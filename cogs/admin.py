@@ -1,11 +1,13 @@
 import logging
+import re
 import discord
+from datetime import datetime
 from discord import app_commands
 from discord.ext import commands
 
 import database as db
 from utils.blog_utils import normalize_tistory_url, check_url_accessible, scan_and_save_existing_posts
-from utils.time_utils import get_week_range, get_month_range
+from utils.time_utils import get_week_range, get_month_range, get_kst_now, KST
 from utils.embed_builder import (
     status_embed, help_embed, member_list_embed,
     info_embed, error_embed, register_success_embed,
@@ -17,6 +19,40 @@ from utils.embed_builder import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_pause_until(date_str: str) -> datetime | None:
+    """날짜 문자열을 KST datetime으로 파싱. 실패 시 None 반환.
+    지원 형식: '5월 11일 09:00' / '5/11 09:00' / '2026-05-11 09:00'
+    """
+    year = get_kst_now().year
+    s = date_str.strip()
+
+    m = re.match(r'(\d{1,2})월\s*(\d{1,2})일(?:\s+(\d{1,2}):(\d{2}))?', s)
+    if m:
+        try:
+            return datetime(year, int(m.group(1)), int(m.group(2)),
+                            int(m.group(3) or 0), int(m.group(4) or 0), tzinfo=KST)
+        except ValueError:
+            return None
+
+    m = re.match(r'(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?', s)
+    if m:
+        try:
+            return datetime(year, int(m.group(1)), int(m.group(2)),
+                            int(m.group(3) or 0), int(m.group(4) or 0), tzinfo=KST)
+        except ValueError:
+            return None
+
+    m = re.match(r'(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?', s)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                            int(m.group(4) or 0), int(m.group(5) or 0), tzinfo=KST)
+        except ValueError:
+            return None
+
+    return None
 
 
 def is_admin():
@@ -121,21 +157,46 @@ class Admin(commands.Cog):
         await interaction.response.send_message(embed=embed)
         logger.info("벌금 금액 설정: %d원 (Guild: %s)", 금액, guild_id)
 
-    @app_commands.command(name="벌금정지", description="[관리자] 이번 주 벌금 부과를 일시정지합니다")
+    @app_commands.command(name="벌금정지", description="[관리자] 벌금 부과를 일시정지합니다")
+    @app_commands.describe(날짜시간="정지 해제 일시 (예: 5월 11일 09:00 / 5/11 09:00 / 2026-05-11 09:00). 미입력 시 수동 재개까지 정지")
     @is_admin()
-    async def pause_penalty(self, interaction: discord.Interaction):
+    async def pause_penalty(self, interaction: discord.Interaction, 날짜시간: str = None):
         guild_id = str(interaction.guild_id)
-        await db.set_setting(guild_id, "penalty_paused", "1")
 
-        embed = info_embed("벌금 정지", "이번 주 벌금 부과가 일시정지되었어요.", color=COLOR_ADMIN)
-        await interaction.response.send_message(embed=embed)
-        logger.info("벌금 정지 (Guild: %s)", guild_id)
+        if 날짜시간 is None:
+            await db.set_setting(guild_id, "penalty_paused", "1")
+            await db.set_setting(guild_id, "penalty_paused_until", "")
+            embed = info_embed("벌금 정지", "벌금 부과가 일시정지되었어요. `/벌금재개`로 해제할 수 있어요.", color=COLOR_ADMIN)
+            await interaction.response.send_message(embed=embed)
+            logger.info("벌금 무기한 정지 (Guild: %s)", guild_id)
+        else:
+            dt = _parse_pause_until(날짜시간)
+            if dt is None:
+                await interaction.response.send_message(
+                    embed=error_embed("날짜 형식이 올바르지 않아요.\n예시: `5월 11일 09:00` / `5/11 09:00` / `2026-05-11 09:00`"),
+                    ephemeral=True
+                )
+                return
+
+            paused_until_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            await db.set_setting(guild_id, "penalty_paused", "0")
+            await db.set_setting(guild_id, "penalty_paused_until", paused_until_str)
+
+            display = dt.strftime("%Y년 %m월 %d일 %H:%M")
+            embed = info_embed(
+                "벌금 일시정지",
+                f"**{display}**까지 벌금 부과가 일시정지되었어요.\n해당 시점 이후 주간 리포트부터 자동으로 재개됩니다.",
+                color=COLOR_ADMIN
+            )
+            await interaction.response.send_message(embed=embed)
+            logger.info("벌금 기간 정지: %s까지 (Guild: %s)", paused_until_str, guild_id)
 
     @app_commands.command(name="벌금재개", description="[관리자] 일시정지된 벌금 부과를 재개합니다")
     @is_admin()
     async def resume_penalty(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
         await db.set_setting(guild_id, "penalty_paused", "0")
+        await db.set_setting(guild_id, "penalty_paused_until", "")
 
         embed = info_embed("벌금 재개", "벌금 부과가 재개되었어요. 다들 이번 주도 파이팅!", color=COLOR_ADMIN)
         await interaction.response.send_message(embed=embed)
