@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import ssl
 import feedparser
+import aiohttp
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timezone
@@ -11,6 +13,10 @@ from config import Config
 from utils.embed_builder import new_post_embed
 
 logger = logging.getLogger(__name__)
+
+FEED_TIMEOUT = aiohttp.ClientTimeout(total=15)
+FEED_HEADERS = {"User-Agent": "TinaBot/1.0 (RSS Monitor)"}
+FEED_MAX_RETRIES = 2
 
 
 class RSSMonitor(commands.Cog):
@@ -92,14 +98,34 @@ class RSSMonitor(commands.Cog):
     async def before_poll_rss(self):
         await self.bot.wait_until_ready()
 
+    async def _fetch_feed(self, url: str, name: str) -> feedparser.FeedParserDict | None:
+        """aiohttp로 RSS XML을 가져온 뒤 feedparser로 파싱. 실패 시 재시도."""
+        ssl_ctx = ssl.create_default_context()
+
+        for attempt in range(1, FEED_MAX_RETRIES + 1):
+            try:
+                async with aiohttp.ClientSession(timeout=FEED_TIMEOUT) as session:
+                    async with session.get(url, headers=FEED_HEADERS, ssl=ssl_ctx) as resp:
+                        if resp.status != 200:
+                            logger.warning("RSS HTTP %d [%s] (시도 %d/%d)", resp.status, name, attempt, FEED_MAX_RETRIES)
+                            await asyncio.sleep(2 * attempt)
+                            continue
+                        xml = await resp.text()
+                return feedparser.parse(xml)
+            except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError) as e:
+                logger.warning("RSS 가져오기 실패 [%s] (시도 %d/%d): %s", name, attempt, FEED_MAX_RETRIES, e)
+                if attempt < FEED_MAX_RETRIES:
+                    await asyncio.sleep(2 * attempt)
+
+        logger.error("RSS 최종 실패 [%s]: %d회 재시도 후 포기", name, FEED_MAX_RETRIES)
+        return None
+
     async def _check_feed(self, member: dict, channel: discord.TextChannel) -> int:
         """개별 멤버의 RSS 피드를 파싱하여 새 글을 찾고 알림. 감지한 새 글 수를 반환."""
-        loop = asyncio.get_running_loop()
-        feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
+        feed = await self._fetch_feed(member["rss_url"], member["discord_name"])
         new_count = 0
 
-        if feed.bozo and not feed.entries:
-            logger.warning("RSS 파싱 실패 [%s]: %s", member["discord_name"], feed.bozo_exception)
+        if feed is None or (feed.bozo and not feed.entries):
             return 0
 
         for entry in feed.entries:
@@ -158,11 +184,12 @@ class RSSMonitor(commands.Cog):
         if not channel:
             return 0
 
-        loop = asyncio.get_running_loop()
         for member in members:
             try:
                 logger.debug("수동 폴링 중: [%s] %s", member["discord_name"], member["rss_url"])
-                feed = await loop.run_in_executor(None, feedparser.parse, member["rss_url"])
+                feed = await self._fetch_feed(member["rss_url"], member["discord_name"])
+                if feed is None:
+                    continue
                 for entry in feed.entries:
                     link = entry.get("link", "").strip()
                     if not link or await db.is_post_exists(link, member["id"]):
