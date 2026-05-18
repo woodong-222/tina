@@ -259,8 +259,16 @@ def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> di
     return embed
 
 
-def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_day: str = "일요일", remind_time: str = "09:00") -> discord.Embed:
-    """도움말 Embed"""
+def _schedule_field_value(reset_day: str, reset_time: str, remind_day: str) -> str:
+    return (
+        f"• 주간 리포트: 매주 **{reset_day} {reset_time}**\n"
+        f"• 마감 리마인드: 매주 **{remind_day} {reset_time}**\n"
+        f"• 월간 리포트: 매달 **1일 {reset_time}**"
+    )
+
+
+def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_day: str = "일요일") -> discord.Embed:
+    """일반 도움말 Embed"""
     embed = discord.Embed(
         title="📖 티나 도움말",
         description=f"티나는 여러분들의 블로그 활동을 응원해요! 화이팅! 💖\n\n이 서버는 매주 **{reset_day} {reset_time}**에 주간 정산이 진행됩니다.\n",
@@ -287,7 +295,32 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
     )
 
     embed.add_field(
-        name="🔧 관리 명령어 (관리자 역할 필요)",
+        name="⏰ 티나가 알려드려요!",
+        value=_schedule_field_value(reset_day, reset_time, remind_day),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔧 관리자 전용",
+        value="관리 명령어는 `/관리자도움말`을 이용해주세요!",
+        inline=False
+    )
+
+    embed.set_footer(text="티나 • made by woo")
+    return embed
+
+
+def admin_help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_day: str = "일요일") -> discord.Embed:
+    """관리자 도움말 Embed"""
+    embed = discord.Embed(
+        title="🔧 티나 관리자 도움말",
+        description="관리자 전용 명령어 목록이에요.",
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+
+    embed.add_field(
+        name="관리 명령어",
         value=(
             "`/멤버티스토리등록 [@유저] 블로그URL` — 멤버 티스토리 대리 등록\n"
             "`/멤버벨로그등록 [@유저] 블로그URL` — 멤버 벨로그 대리 등록\n"
@@ -304,15 +337,11 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
 
     embed.add_field(
         name="⏰ 티나가 알려드려요!",
-        value=(
-            f"• 주간 리포트: 매주 {reset_day} {reset_time}\n"
-            f"• 마감 리마인드: 매주 {remind_day} {remind_time}"
-        ),
+        value=_schedule_field_value(reset_day, reset_time, remind_day),
         inline=False
     )
 
     embed.set_footer(text="티나 • made by woo")
-
     return embed
 
 

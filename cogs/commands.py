@@ -10,7 +10,7 @@ from utils.blog_utils import (
     check_url_accessible, scan_and_save_existing_posts
 )
 from utils.embed_builder import (
-    stats_embed, status_embed, help_embed, penalty_embed,
+    stats_embed, status_embed, help_embed, admin_help_embed, penalty_embed,
     server_stats_embed, server_penalty_embed, member_list_embed,
     refresh_embed, info_embed, error_embed,
     register_success_embed, unregister_success_embed,
@@ -249,7 +249,20 @@ class Commands(commands.Cog):
         reset_time_str = f"{r_hour:02d}:{r_min:02d}"
         remind_day_str = f"{days[(r_day - 1) % 7]}요일"
 
-        embed = help_embed(reset_day_str, reset_time_str, remind_day_str, reset_time_str)
+        embed = help_embed(reset_day_str, reset_time_str, remind_day_str)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="관리자도움말", description="관리자 전용 명령어 목록을 안내합니다")
+    async def admin_help_command(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+
+        days = ["월", "화", "수", "목", "금", "토", "일"]
+        reset_day_str = f"{days[r_day]}요일"
+        reset_time_str = f"{r_hour:02d}:{r_min:02d}"
+        remind_day_str = f"{days[(r_day - 1) % 7]}요일"
+
+        embed = admin_help_embed(reset_day_str, reset_time_str, remind_day_str)
         await interaction.response.send_message(embed=embed)
 
     # ===== 조회 =====

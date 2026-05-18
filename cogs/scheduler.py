@@ -13,8 +13,7 @@ from utils.blog_utils import parse_published_at_from_html, _IGNORE_PATTERNS
 
 logger = logging.getLogger(__name__)
 
-SCAN_TIME = time(hour=0, minute=0, tzinfo=KST)          # 매일 자정 스캔
-MONTHLY_REPORT_TIME = time(hour=0, minute=5, tzinfo=KST) # 매달 1일 00:05 월간 리포트
+SCAN_TIME = time(hour=0, minute=0, tzinfo=KST)  # 매일 자정 스캔
 
 
 class Scheduler(commands.Cog):
@@ -31,14 +30,9 @@ class Scheduler(commands.Cog):
             self.daily_sitemap_scan.start()
             logger.info("일일 누락 방지 스캔 스케줄러 시작 (매일 %s)", SCAN_TIME)
 
-        if not self.monthly_report_task.is_running():
-            self.monthly_report_task.start()
-            logger.info("월간 리포트 스케줄러 시작 (매월 1일 %s)", MONTHLY_REPORT_TIME)
-
     def cog_unload(self):
         self.main_scheduler.cancel()
         self.daily_sitemap_scan.cancel()
-        self.monthly_report_task.cancel()
 
     async def _resolve_channel(self, guild_id: str) -> discord.TextChannel | None:
         """알림 채널 반환. 설정된 채널이 없거나 삭제됐으면 position 순 첫 번째 채널로 폴백."""
@@ -91,6 +85,11 @@ class Scheduler(commands.Cog):
                 if now.weekday() == remind_day and now.hour == r_hour and now.minute == r_min:
                     logger.info("마감 리마인드 발송 조건 충족 [Guild: %s]", guild_id)
                     await self._send_remind(guild_id, r_day, r_hour, r_min)
+
+                # 3. 월간 리포트 (매달 1일, 초기화 시간)
+                if now.day == 1 and now.hour == r_hour and now.minute == r_min:
+                    logger.info("월간 리포트 발송 조건 충족 [Guild: %s]", guild_id)
+                    await self._send_monthly_report(guild_id, now)
                     
             except Exception as e:
                 logger.error("메인 스케줄러 오류 [Guild: %s]: %s", guild_id, e)
@@ -278,21 +277,6 @@ class Scheduler(commands.Cog):
     async def before_daily_sitemap_scan(self):
         await self.bot.wait_until_ready()
 
-    @tasks.loop(time=MONTHLY_REPORT_TIME)
-    async def monthly_report_task(self):
-        """매일 00:05에 실행되며, 1일에만 전월 월간 리포트를 발송"""
-        now = get_kst_now()
-        if now.day != 1:
-            return
-
-        logger.info("월간 리포트 발송 시작 (기준: %d년 %d월)", now.year, now.month)
-        guild_ids = await db.get_all_guild_ids()
-        for guild_id in guild_ids:
-            try:
-                await self._send_monthly_report(guild_id, now)
-            except Exception as e:
-                logger.error("월간 리포트 발송 실패 [Guild: %s]: %s", guild_id, e)
-
     async def _send_monthly_report(self, guild_id: str, now):
         channel = await self._resolve_channel(guild_id)
         if not channel:
@@ -320,10 +304,6 @@ class Scheduler(commands.Cog):
         embed = monthly_report_embed(prev_year, prev_month, member_stats)
         await channel.send(embed=embed)
         logger.info("월간 리포트 발송 완료 [Guild: %s] (%d년 %d월)", guild_id, prev_year, prev_month)
-
-    @monthly_report_task.before_loop
-    async def before_monthly_report_task(self):
-        await self.bot.wait_until_ready()
 
 
 async def setup(bot: commands.Bot):
