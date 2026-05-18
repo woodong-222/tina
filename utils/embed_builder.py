@@ -7,7 +7,10 @@ _MAX_FIELD = 1024
 def _truncate_field(value: str) -> str:
     if len(value) <= _MAX_FIELD:
         return value
-    return value[: _MAX_FIELD - 5] + "\n..."
+    cutoff = value[: _MAX_FIELD - 5].rfind('\n')
+    if cutoff == -1:
+        cutoff = _MAX_FIELD - 5
+    return value[:cutoff] + "\n..."
 
 
 # 색상 상수 정의
