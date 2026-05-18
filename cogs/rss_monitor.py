@@ -6,6 +6,7 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timezone
+from urllib.parse import unquote
 from utils.time_utils import get_kst_now, KST
 
 import database as db
@@ -128,8 +129,10 @@ class RSSMonitor(commands.Cog):
         if feed is None or (feed.bozo and not feed.entries):
             return 0
 
+        is_velog = "v2.velog.io" in member["rss_url"]
         for entry in feed.entries:
-            link = entry.get("link", "").strip()
+            raw = entry.get("link", "").strip()
+            link = unquote(raw) if is_velog else raw
             if not link:
                 continue
 
@@ -190,8 +193,10 @@ class RSSMonitor(commands.Cog):
                 feed = await self._fetch_feed(member["rss_url"], member["discord_name"])
                 if feed is None:
                     continue
+                is_velog = "v2.velog.io" in member["rss_url"]
                 for entry in feed.entries:
-                    link = entry.get("link", "").strip()
+                    raw = entry.get("link", "").strip()
+                    link = unquote(raw) if is_velog else raw
                     if not link or await db.is_post_exists(link, member["id"]):
                         continue
 

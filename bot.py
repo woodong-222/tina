@@ -14,7 +14,6 @@ import os
 log_level = logging.DEBUG if Config.BOT_MODE == "test" else logging.INFO
 
 os.makedirs("logs", exist_ok=True)
-os.makedirs("data", exist_ok=True)
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -47,7 +46,7 @@ logger = logging.getLogger("tina")
 # discord.py 내부 로그가 너무 많아지는 것을 방지 (테스트 모드라도 discord 라이브러리 자체는 INFO 유지)
 logging.getLogger("discord").setLevel(logging.INFO)
 logging.getLogger("discord.http").setLevel(logging.WARNING)
-logging.getLogger("aiosqlite").setLevel(logging.INFO)
+
 
 COGS = [
     "cogs.rss_monitor",

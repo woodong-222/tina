@@ -1,16 +1,35 @@
 services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: tina
+      POSTGRES_USER: tina
+      POSTGRES_PASSWORD: tina_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tina"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   tina:
     build: .
     image: woo204/tina:latest
-    container_name: tina
     restart: always
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
       - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
         max-size: "10mb"
         max-file: "3"
+
+volumes:
+  postgres_data:

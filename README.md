@@ -14,7 +14,6 @@ docker-compose up -d --build
 
 - `DISCORD_TOKEN`: 디스코드 봇 토큰
 - `BOT_MODE`: `test` (테스트모드) 또는 `prod` (운영모드)
-- `PENALTY_AMOUNT`: 미작성 시 부과할 벌금 금액 (원)
 - `RSS_POLL_INTERVAL`: 블로그 감지 간격 (분)
 
 ## 주요 명령어

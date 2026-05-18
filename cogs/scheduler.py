@@ -8,7 +8,7 @@ import re
 
 import database as db
 from utils.time_utils import get_week_range, get_last_week_range, get_last_month_range, get_kst_now, KST
-from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_embed, monthly_report_embed
+from utils.embed_builder import weekly_report_embed, weekly_report_status_text, remind_embed, missed_post_embed, monthly_report_embed
 from utils.blog_utils import parse_published_at_from_html, _IGNORE_PATTERNS
 
 logger = logging.getLogger(__name__)
@@ -120,26 +120,38 @@ class Scheduler(commands.Cog):
                 except Exception:
                     pass
 
-        member_stats = []
+        # discord_id별로 포스팅 집계 (멀티 플랫폼 합산)
+        stats_by_discord = {}
         for member in members:
+            did = member["discord_id"]
             posts = await db.get_posts_in_range(member["id"], week_start, week_end)
-            count = len(posts)
-            member_stats.append({
-                "discord_id": member["discord_id"],
-                "discord_name": member["discord_name"],
-                "member_id": member["id"],
-                "post_count": count,
-                "posts": posts
-            })
+            if did not in stats_by_discord:
+                stats_by_discord[did] = {
+                    "discord_id": did,
+                    "discord_name": member["discord_name"],
+                    "member_ids": [],
+                    "posts": [],
+                    "post_count": 0,
+                }
+            stats_by_discord[did]["member_ids"].append(member["id"])
+            stats_by_discord[did]["posts"].extend(posts)
+            stats_by_discord[did]["post_count"] += len(posts)
 
-            if count == 0 and not is_paused:
-                already_exists = await db.is_penalty_exists(member["id"], week_start)
+        member_stats = list(stats_by_discord.values())
+
+        # 벌금은 discord_id별로 한 번만 부과
+        for stat in member_stats:
+            if stat["post_count"] == 0 and not is_paused:
+                first_member_id = stat["member_ids"][0]
+                already_exists = await db.is_penalty_exists(first_member_id, week_start)
                 if not already_exists:
-                    await db.add_penalty(member["id"], week_start, week_end, penalty_amount)
-                    logger.info("벌금 부과: %s (%s원)", member["discord_name"], penalty_amount)
+                    await db.add_penalty(first_member_id, week_start, week_end, penalty_amount)
+                    logger.info("벌금 부과: %s (%s원)", stat["discord_name"], penalty_amount)
 
         embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused)
+        status_text = weekly_report_status_text(week_start, week_end, member_stats, is_paused)
         await channel.send(embed=embed)
+        await channel.send(status_text)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
     @main_scheduler.before_loop
@@ -154,11 +166,16 @@ class Scheduler(commands.Cog):
         week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
         members = await db.get_all_members(guild_id)
 
-        members_without_posts = []
+        # discord_id별로 합산 후 0편인 사람만 추출
+        counts_by_discord = {}
         for member in members:
+            did = member["discord_id"]
             count = await db.get_post_count_in_range(member["id"], week_start, week_end)
-            if count == 0:
-                members_without_posts.append(member)
+            if did not in counts_by_discord:
+                counts_by_discord[did] = {"member": member, "count": 0}
+            counts_by_discord[did]["count"] += count
+
+        members_without_posts = [v["member"] for v in counts_by_discord.values() if v["count"] == 0]
 
         if not members_without_posts:
             return
@@ -287,14 +304,18 @@ class Scheduler(commands.Cog):
         prev_year = now.year if now.month > 1 else now.year - 1
 
         members = await db.get_all_members(guild_id)
-        member_stats = []
+        stats_by_discord = {}
         for member in members:
+            did = member["discord_id"]
             count = await db.get_post_count_in_range(member["id"], month_start, month_end)
-            member_stats.append({
-                "discord_id": member["discord_id"],
-                "discord_name": member["discord_name"],
-                "post_count": count,
-            })
+            if did not in stats_by_discord:
+                stats_by_discord[did] = {
+                    "discord_id": did,
+                    "discord_name": member["discord_name"],
+                    "post_count": 0,
+                }
+            stats_by_discord[did]["post_count"] += count
+        member_stats = list(stats_by_discord.values())
 
         embed = monthly_report_embed(prev_year, prev_month, member_stats)
         await channel.send(embed=embed)

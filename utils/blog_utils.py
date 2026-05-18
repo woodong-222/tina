@@ -5,6 +5,7 @@ import aiohttp
 import feedparser
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from urllib.parse import unquote
 
 from utils.time_utils import get_kst_now, KST
 import database as db
@@ -20,6 +21,27 @@ def normalize_tistory_url(raw_url: str) -> str | None:
     if not match or match.group(1) == "www":
         return None
     return f"https://{match.group(1)}.tistory.com"
+
+
+def normalize_velog_url(raw_url: str) -> str | None:
+    """벨로그 URL을 정규화. 유효하지 않으면 None 반환."""
+    match = re.search(r'velog\.io/@([a-zA-Z0-9_.-]+)', raw_url, re.IGNORECASE)
+    if not match:
+        return None
+    return f"https://velog.io/@{match.group(1)}"
+
+
+def normalize_blog_url(raw_url: str) -> str | None:
+    """티스토리 또는 벨로그 URL 정규화. 둘 다 아니면 None 반환."""
+    return normalize_tistory_url(raw_url) or normalize_velog_url(raw_url)
+
+
+def get_rss_url(blog_url: str) -> str:
+    """블로그 URL로부터 RSS URL 반환."""
+    if "velog.io/@" in blog_url:
+        username = blog_url.split("/@")[1].rstrip("/")
+        return f"https://v2.velog.io/rss/@{username}"
+    return f"{blog_url}/rss"
 
 
 async def check_url_accessible(url: str) -> tuple[bool, int | None]:
@@ -69,13 +91,99 @@ async def fetch_post_meta(session: aiohttp.ClientSession, url: str) -> tuple[str
     return title, published_str
 
 
+_VELOG_GRAPHQL_URL = "https://v2.velog.io/graphql"
+_VELOG_POSTS_QUERY = """
+query GetPosts($username: String!, $cursor: ID) {
+  posts(username: $username, cursor: $cursor) {
+    id
+    title
+    released_at
+    url_slug
+  }
+}
+"""
+
+
+async def _fetch_velog_all_posts(username: str) -> list[dict]:
+    """벨로그 GraphQL API로 전체 글 목록을 페이지네이션하여 반환."""
+    posts = []
+    cursor = None
+    async with aiohttp.ClientSession() as session:
+        while True:
+            payload = {
+                "query": _VELOG_POSTS_QUERY,
+                "variables": {"username": username, "cursor": cursor},
+            }
+            try:
+                async with session.post(_VELOG_GRAPHQL_URL, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+            except Exception as e:
+                logger.error("벨로그 GraphQL 요청 실패 [%s]: %s", username, e)
+                break
+            page_posts = data.get("data", {}).get("posts", [])
+            if not page_posts:
+                break
+            posts.extend(page_posts)
+            cursor = page_posts[-1]["id"]
+            if len(page_posts) < 20:
+                break
+    return posts
+
+
 async def scan_and_save_existing_posts(member: dict, blog_url: str) -> int:
-    """RSS + 사이트맵으로 기존 글을 스캔하여 is_initial=True로 저장. 처리된 글 수 반환."""
+    """RSS + 사이트맵(티스토리) 또는 GraphQL(벨로그)로 기존 글을 스캔하여 is_initial=True로 저장. 처리된 글 수 반환."""
     blog_url = blog_url.rstrip("/")
+    count = 0
+
+    if "velog.io/@" in blog_url:
+        username = blog_url.split("/@")[1]
+        logger.debug("벨로그 기존 글 스캔 시작: [%s] %s", member.get("discord_name", "?"), blog_url)
+        added_links: set[str] = set()
+
+        # RSS 먼저 저장 → RSS 모니터가 사용하는 URL 형식과 100% 일치 보장
+        rss_url = f"https://v2.velog.io/rss/@{username}"
+        loop = asyncio.get_running_loop()
+        feed = await loop.run_in_executor(None, feedparser.parse, rss_url)
+        for entry in feed.entries:
+            link = unquote(entry.get("link", "").strip())
+            if not link or link in added_links:
+                continue
+            title = entry.get("title", "제목 없음").strip()
+            try:
+                if entry.get("published_parsed"):
+                    utc_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    published_str = utc_dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
+            saved = await db.add_post(member["id"], title, link, published_str, is_initial=True)
+            added_links.add(link)
+            if saved:
+                count += 1
+
+        # GraphQL로 RSS에 없는 과거 글 보완
+        velog_posts = await _fetch_velog_all_posts(username)
+        for p in velog_posts:
+            link = f"https://velog.io/@{username}/{p['url_slug']}"
+            if link in added_links:
+                continue
+            title = p.get("title") or "제목 없음"
+            try:
+                published_str = p["released_at"][:19].replace("T", " ")
+            except Exception:
+                published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
+            saved = await db.add_post(member["id"], title, link, published_str, is_initial=True)
+            added_links.add(link)
+            if saved:
+                count += 1
+
+        logger.debug("벨로그 스캔 완료: [%s] 총 %d편 저장", member.get("discord_name", "?"), count)
+        return count
+
     rss_url = f"{blog_url}/rss"
     sitemap_url = f"{blog_url}/sitemap.xml"
     added_links: set[str] = set()
-    count = 0
 
     logger.debug("기존 글 스캔 시작: [%s] %s", member.get("discord_name", "?"), blog_url)
 

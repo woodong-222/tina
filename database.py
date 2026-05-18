@@ -1,49 +1,52 @@
-import aiosqlite
+import logging
+import asyncpg
 from config import Config
+
+logger = logging.getLogger(__name__)
+
+_pool: asyncpg.Pool | None = None
 
 
 async def init_db():
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        await db.execute("""
+    global _pool
+    _pool = await asyncpg.create_pool(Config.DATABASE_URL, min_size=2, max_size=10)
+    async with _pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 guild_id TEXT NOT NULL,
                 discord_id TEXT NOT NULL,
                 discord_name TEXT NOT NULL,
                 blog_url TEXT NOT NULL,
                 rss_url TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(guild_id, discord_id)
+                platform TEXT NOT NULL DEFAULT 'tistory',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(guild_id, discord_id, platform)
             )
         """)
-
-        await db.execute("""
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                member_id INTEGER NOT NULL,
+                id SERIAL PRIMARY KEY,
+                member_id INTEGER NOT NULL REFERENCES members(id),
                 title TEXT NOT NULL,
                 link TEXT NOT NULL,
-                published_at DATETIME,
-                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                published_at TEXT,
+                detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_initial INTEGER DEFAULT 0,
-                FOREIGN KEY (member_id) REFERENCES members(id),
                 UNIQUE(member_id, link)
             )
         """)
-
-        await db.execute("""
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS penalties (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                member_id INTEGER NOT NULL,
-                week_start DATE NOT NULL,
-                week_end DATE NOT NULL,
+                id SERIAL PRIMARY KEY,
+                member_id INTEGER NOT NULL REFERENCES members(id),
+                week_start TEXT NOT NULL,
+                week_end TEXT NOT NULL,
                 amount INTEGER NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (member_id) REFERENCES members(id)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-
-        await db.execute("""
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 guild_id TEXT NOT NULL,
                 key TEXT NOT NULL,
@@ -51,226 +54,211 @@ async def init_db():
                 PRIMARY KEY(guild_id, key)
             )
         """)
-
-        await db.commit()
-
-    await _migrate_posts_if_needed()
+    await _migrate_platform_if_needed()
 
 
-async def _migrate_posts_if_needed():
-    """posts 테이블의 UNIQUE 제약이 link 단독 → (member_id, link) 복합으로 변경되지 않은 경우 마이그레이션"""
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='posts'"
+async def _migrate_platform_if_needed():
+    """platform 컬럼 없는 기존 DB에 컬럼 추가 및 UNIQUE 제약 변경 (최초 1회)"""
+    async with _pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='members' AND column_name='platform')"
         )
-        row = await cursor.fetchone()
-        if not row or "link TEXT UNIQUE" not in row[0]:
-            return  # 테이블이 없거나 이미 새 스키마
+        if exists:
+            return
 
-        await db.execute("ALTER TABLE posts RENAME TO posts_old")
-        await db.execute("""
-            CREATE TABLE posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                member_id INTEGER NOT NULL,
-                title TEXT NOT NULL,
-                link TEXT NOT NULL,
-                published_at DATETIME,
-                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                is_initial INTEGER DEFAULT 0,
-                FOREIGN KEY (member_id) REFERENCES members(id),
-                UNIQUE(member_id, link)
-            )
-        """)
-        await db.execute("""
-            INSERT INTO posts (id, member_id, title, link, published_at, detected_at, is_initial)
-            SELECT id, member_id, title, link, published_at, detected_at, is_initial FROM posts_old
-        """)
-        await db.execute("DROP TABLE posts_old")
-        await db.commit()
+        await conn.execute("ALTER TABLE members ADD COLUMN platform TEXT NOT NULL DEFAULT 'tistory'")
+
+        constraints = await conn.fetch(
+            "SELECT constraint_name FROM information_schema.table_constraints "
+            "WHERE table_name='members' AND constraint_type='UNIQUE'"
+        )
+        for c in constraints:
+            await conn.execute(f"ALTER TABLE members DROP CONSTRAINT IF EXISTS {c['constraint_name']}")
+
+        await conn.execute(
+            "ALTER TABLE members ADD CONSTRAINT members_guild_discord_platform_key "
+            "UNIQUE (guild_id, discord_id, platform)"
+        )
+        logger.info("members 테이블 platform 컬럼 마이그레이션 완료")
 
 
 # ===== 멤버 CRUD =====
 
-async def add_member(guild_id: str, discord_id: str, discord_name: str, blog_url: str) -> bool:
+async def add_member(guild_id: str, discord_id: str, discord_name: str, blog_url: str, platform: str) -> bool:
     blog_url = blog_url.rstrip("/")
-    rss_url = f"{blog_url}/rss"
+    if "velog.io/@" in blog_url:
+        username = blog_url.split("/@")[1].rstrip("/")
+        rss_url = f"https://v2.velog.io/rss/@{username}"
+    else:
+        rss_url = f"{blog_url}/rss"
 
     try:
-        async with aiosqlite.connect(Config.DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO members (guild_id, discord_id, discord_name, blog_url, rss_url) VALUES (?, ?, ?, ?, ?)",
-                (guild_id, discord_id, discord_name, blog_url, rss_url)
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO members (guild_id, discord_id, discord_name, blog_url, rss_url, platform) "
+                "VALUES ($1, $2, $3, $4, $5, $6)",
+                guild_id, discord_id, discord_name, blog_url, rss_url, platform
             )
-            await db.commit()
             return True
-    except aiosqlite.IntegrityError:
+    except asyncpg.UniqueViolationError:
         return False
 
 
-async def remove_member(guild_id: str, discord_id: str) -> bool:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT id FROM members WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id)
+async def remove_member(guild_id: str, discord_id: str, platform: str) -> bool:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM members WHERE guild_id = $1 AND discord_id = $2 AND platform = $3",
+            guild_id, discord_id, platform
         )
-        row = await cursor.fetchone()
         if not row:
             return False
-        member_id = row[0]
-        await db.execute("DELETE FROM posts WHERE member_id = ?", (member_id,))
-        await db.execute("DELETE FROM penalties WHERE member_id = ?", (member_id,))
-        await db.execute("DELETE FROM members WHERE id = ?", (member_id,))
-        await db.commit()
+        member_id = row["id"]
+        await conn.execute("DELETE FROM posts WHERE member_id = $1", member_id)
+        await conn.execute("DELETE FROM penalties WHERE member_id = $1", member_id)
+        await conn.execute("DELETE FROM members WHERE id = $1", member_id)
         return True
 
 
 async def get_all_members(guild_id: str = None) -> list[dict]:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with _pool.acquire() as conn:
         if guild_id:
-            cursor = await db.execute("SELECT * FROM members WHERE guild_id = ?", (guild_id,))
+            rows = await conn.fetch("SELECT * FROM members WHERE guild_id = $1", guild_id)
         else:
-            cursor = await db.execute("SELECT * FROM members")
-        rows = await cursor.fetchall()
+            rows = await conn.fetch("SELECT * FROM members")
         return [dict(row) for row in rows]
 
 
 async def update_discord_name(member_id: int, new_name: str):
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        await db.execute(
-            "UPDATE members SET discord_name = ? WHERE id = ?",
-            (new_name, member_id)
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE members SET discord_name = $1 WHERE id = $2",
+            new_name, member_id
         )
-        await db.commit()
 
 
-async def get_member_by_discord_id(guild_id: str, discord_id: str) -> dict | None:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM members WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id)
+async def get_member_by_discord_id(guild_id: str, discord_id: str, platform: str) -> dict | None:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM members WHERE guild_id = $1 AND discord_id = $2 AND platform = $3",
+            guild_id, discord_id, platform
         )
-        row = await cursor.fetchone()
         return dict(row) if row else None
+
+
+async def get_members_by_discord_id(guild_id: str, discord_id: str) -> list[dict]:
+    """해당 유저의 모든 플랫폼 멤버 항목 반환"""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM members WHERE guild_id = $1 AND discord_id = $2",
+            guild_id, discord_id
+        )
+        return [dict(row) for row in rows]
 
 
 # ===== 포스팅 CRUD =====
 
 async def is_post_exists(link: str, member_id: int) -> bool:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT 1 FROM posts WHERE link = ? AND member_id = ?", (link, member_id)
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT 1 FROM posts WHERE link = $1 AND member_id = $2", link, member_id
         )
-        return await cursor.fetchone() is not None
+        return row is not None
 
 
 async def add_post(member_id: int, title: str, link: str, published_at: str, is_initial: bool = False) -> bool:
-    """포스팅 추가. is_initial=True면 등록 시점의 기존 글 (알림 안 감)"""
     try:
-        async with aiosqlite.connect(Config.DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO posts (member_id, title, link, published_at, is_initial) VALUES (?, ?, ?, ?, ?)",
-                (member_id, title, link, published_at, 1 if is_initial else 0)
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO posts (member_id, title, link, published_at, is_initial) VALUES ($1, $2, $3, $4, $5)",
+                member_id, title, link, published_at, 1 if is_initial else 0
             )
-            await db.commit()
             return True
-    except aiosqlite.IntegrityError:
+    except asyncpg.UniqueViolationError:
         return False
 
 
 async def get_posts_in_range(member_id: int, start_date: str, end_date: str) -> list[dict]:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
             """SELECT * FROM posts
-               WHERE member_id = ? AND published_at >= ? AND published_at <= ?
+               WHERE member_id = $1 AND published_at >= $2 AND published_at <= $3
                ORDER BY published_at DESC""",
-            (member_id, start_date, end_date)
+            member_id, start_date, end_date
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
 
 async def get_post_count_in_range(member_id: int, start_date: str, end_date: str) -> int:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
+    async with _pool.acquire() as conn:
+        val = await conn.fetchval(
             """SELECT COUNT(*) FROM posts
-               WHERE member_id = ? AND published_at >= ? AND published_at <= ?""",
-            (member_id, start_date, end_date)
+               WHERE member_id = $1 AND published_at >= $2 AND published_at <= $3""",
+            member_id, start_date, end_date
         )
-        row = await cursor.fetchone()
-        return row[0] if row else 0
+        return val or 0
 
 
 # ===== 벌금 CRUD =====
 
 async def add_penalty(member_id: int, week_start: str, week_end: str, amount: int) -> bool:
     try:
-        async with aiosqlite.connect(Config.DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO penalties (member_id, week_start, week_end, amount) VALUES (?, ?, ?, ?)",
-                (member_id, week_start, week_end, amount)
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO penalties (member_id, week_start, week_end, amount) VALUES ($1, $2, $3, $4)",
+                member_id, week_start, week_end, amount
             )
-            await db.commit()
             return True
     except Exception:
         return False
 
 
 async def get_penalties_for_member(member_id: int) -> list[dict]:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM penalties WHERE member_id = ? ORDER BY week_start DESC",
-            (member_id,)
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM penalties WHERE member_id = $1 ORDER BY week_start DESC",
+            member_id
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
 
 async def get_total_penalty(member_id: int) -> int:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM penalties WHERE member_id = ?",
-            (member_id,)
+    async with _pool.acquire() as conn:
+        val = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount), 0) FROM penalties WHERE member_id = $1",
+            member_id
         )
-        row = await cursor.fetchone()
-        return row[0] if row else 0
+        return val or 0
 
 
 async def is_penalty_exists(member_id: int, week_start: str) -> bool:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT 1 FROM penalties WHERE member_id = ? AND week_start = ?",
-            (member_id, week_start)
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT 1 FROM penalties WHERE member_id = $1 AND week_start = $2",
+            member_id, week_start
         )
-        return await cursor.fetchone() is not None
+        return row is not None
 
 
 # ===== 설정 CRUD =====
 
 async def get_setting(key: str, default: str = "", guild_id: str = None) -> str:
-    async with aiosqlite.connect(Config.DB_PATH) as db:
+    async with _pool.acquire() as conn:
         if guild_id:
-            cursor = await db.execute(
-                "SELECT value FROM settings WHERE guild_id = ? AND key = ?", (guild_id, key)
+            val = await conn.fetchval(
+                "SELECT value FROM settings WHERE guild_id = $1 AND key = $2", guild_id, key
             )
         else:
-            cursor = await db.execute(
-                "SELECT value FROM settings WHERE key = ? LIMIT 1", (key,)
+            val = await conn.fetchval(
+                "SELECT value FROM settings WHERE key = $1 LIMIT 1", key
             )
-        row = await cursor.fetchone()
-        return row[0] if row else default
+        return val if val is not None else default
 
 
 async def get_reset_time(guild_id: str) -> tuple[int, int, int]:
-    """
-    서버의 초기화 시간을 가져옵니다.
-    반환: (weekday, hour, minute)
-    기본값: 월요일(0), 09, 00
-    """
     weekday_str = await get_setting("reset_weekday", "0", guild_id)
     time_str = await get_setting("reset_time", "09:00", guild_id)
-    
+
     try:
         weekday = int(weekday_str)
         hour, minute = map(int, time_str.split(":"))
@@ -280,33 +268,29 @@ async def get_reset_time(guild_id: str) -> tuple[int, int, int]:
 
 
 async def set_setting(guild_id: str, key: str, value: str):
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO settings (guild_id, key, value) VALUES (?, ?, ?)",
-            (guild_id, key, value)
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO settings (guild_id, key, value) VALUES ($1, $2, $3)
+               ON CONFLICT (guild_id, key) DO UPDATE SET value = EXCLUDED.value""",
+            guild_id, key, value
         )
-        await db.commit()
 
 
 # ===== 유틸 =====
 
 async def get_all_guild_ids() -> list[str]:
-    """등록된 멤버가 있는 모든 길드 ID를 반환"""
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        cursor = await db.execute("SELECT DISTINCT guild_id FROM members")
-        rows = await cursor.fetchall()
-        return [row[0] for row in rows]
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT guild_id FROM members")
+        return [row["guild_id"] for row in rows]
 
 
 async def delete_all_guild_data(guild_id: str):
-    """길드의 모든 데이터 삭제 (포스팅 → 벌금 → 멤버 → 설정 순)"""
-    async with aiosqlite.connect(Config.DB_PATH) as db:
-        await db.execute(
-            "DELETE FROM posts WHERE member_id IN (SELECT id FROM members WHERE guild_id = ?)", (guild_id,)
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM posts WHERE member_id IN (SELECT id FROM members WHERE guild_id = $1)", guild_id
         )
-        await db.execute(
-            "DELETE FROM penalties WHERE member_id IN (SELECT id FROM members WHERE guild_id = ?)", (guild_id,)
+        await conn.execute(
+            "DELETE FROM penalties WHERE member_id IN (SELECT id FROM members WHERE guild_id = $1)", guild_id
         )
-        await db.execute("DELETE FROM members WHERE guild_id = ?", (guild_id,))
-        await db.execute("DELETE FROM settings WHERE guild_id = ?", (guild_id,))
-        await db.commit()
+        await conn.execute("DELETE FROM members WHERE guild_id = $1", guild_id)
+        await conn.execute("DELETE FROM settings WHERE guild_id = $1", guild_id)

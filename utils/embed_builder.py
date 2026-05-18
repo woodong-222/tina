@@ -29,7 +29,7 @@ def bot_welcome_embed() -> discord.Embed:
             "블로그 포스팅을 자동으로 감지하고 알려주는 봇이에요.\n\n"
             "**시작하려면 아래 명령어를 사용해주세요:**\n"
             "1. `/채널설정 #채널` — 알림을 받을 채널 설정\n"
-            "2. `/멤버신규등록 @유저 블로그URL` — 멤버 등록 (관리자 전용)\n"
+            "2. `/멤버티스토리등록` / `/멤버벨로그등록 @유저 블로그URL` — 멤버 등록 (관리자 전용)\n"
             "3. `/도움말` — 전체 사용법 보기"
         ),
         color=COLOR_SUCCESS,
@@ -86,35 +86,12 @@ def weekly_report_embed(
         timestamp=get_kst_now()
     )
 
-    report_lines = []
     penalty_members = []
-
     for stat in member_stats:
         count = stat["post_count"]
         mention = f"<@{stat['discord_id']}>"
-        posts = stat.get("posts", [])
-
-        if count > 0:
-            report_lines.append(f"🟢 {mention} — **{count}편** 작성")
-            for p in posts[:5]:
-                title = p["title"]
-                if len(title) > 30:
-                    title = title[:27] + "..."
-                report_lines.append(f"　 ↳ [{title}]({p['link']})")
-            if count > 5:
-                report_lines.append(f"　 ↳ ... 외 {count - 5}편")
-        else:
-            if is_paused:
-                report_lines.append(f"🔴 {mention} — **0편**")
-            else:
-                report_lines.append(f"🔴 {mention} — **0편** (벌금 부과)")
-                penalty_members.append(mention)
-
-    embed.add_field(
-        name="작성 현황",
-        value=_truncate_field("\n".join(report_lines) if report_lines else "아무도 없네요 저 티나랑 놀아주세요"),
-        inline=False
-    )
+        if count == 0 and not is_paused:
+            penalty_members.append(mention)
 
     if is_paused:
         embed.add_field(name="벌금 정지", value="이번 주는 벌금이 정지되었어요.", inline=False)
@@ -128,6 +105,30 @@ def weekly_report_embed(
     embed.set_footer(text="티나 • 주간 리포트")
 
     return embed
+
+
+def weekly_report_status_text(
+    week_start: str,
+    week_end: str,
+    member_stats: list[dict],
+    is_paused: bool = False,
+) -> str:
+    """주간 리포트 작성 현황 plain text (embed 글자 제한 우회)"""
+    lines = ["**작성 현황**"]
+    for stat in member_stats:
+        count = stat["post_count"]
+        mention = f"<@{stat['discord_id']}>"
+        posts = stat.get("posts", [])
+        if count > 0:
+            lines.append(f"🟢 {mention} — **{count}편** 작성")
+            for p in posts:
+                lines.append(f"　 ↳ [{p['title']}]({p['link']})")
+        else:
+            if is_paused:
+                lines.append(f"🔴 {mention} — **0편**")
+            else:
+                lines.append(f"🔴 {mention} — **0편** (벌금 부과)")
+    return "\n".join(lines) if len(lines) > 1 else "아무도 없네요 저 티나랑 놀아주세요"
 
 
 def post_list_embed(
@@ -271,8 +272,10 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
         name="📊 일반 명령어",
         value=(
             "*(명령어 뒤에 `@유저`를 지정하지 않으면 전체를 보여줍니다)*\n"
-            "`/신규등록 [블로그주소]` — 본인 블로그 봇에 등록\n"
-            "`/삭제` — 본인 블로그 등록 해제\n"
+            "`/티스토리등록 [블로그주소]` — 티스토리 블로그 등록\n"
+            "`/벨로그등록 [블로그주소]` — 벨로그 등록\n"
+            "`/티스토리삭제` — 티스토리 블로그 등록 해제\n"
+            "`/벨로그삭제` — 벨로그 등록 해제\n"
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/조회 [@유저]` — 이번 주 현황 / 포스팅 목록\n"
@@ -286,8 +289,10 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
     embed.add_field(
         name="🔧 관리 명령어 (관리자 역할 필요)",
         value=(
-            "`/멤버신규등록 [@유저] 블로그URL` — 멤버 대리 등록\n"
-            "`/멤버삭제 [@유저]` — 멤버 대리 삭제\n"
+            "`/멤버티스토리등록 [@유저] 블로그URL` — 멤버 티스토리 대리 등록\n"
+            "`/멤버벨로그등록 [@유저] 블로그URL` — 멤버 벨로그 대리 등록\n"
+            "`/멤버티스토리삭제 [@유저]` — 멤버 티스토리 대리 삭제\n"
+            "`/멤버벨로그삭제 [@유저]` — 멤버 벨로그 대리 삭제\n"
             "`/채널설정 [#채널]` — 알림 채널 변경\n"
             "`/벌금설정 [금액]` — 벌금 금액 변경\n"
             "`/벌금정지 [날짜시간]` — 벌금 부과 일시정지 (날짜 지정 시 자동 해제)\n"
@@ -320,12 +325,13 @@ def member_list_embed(members: list[dict]) -> discord.Embed:
     )
 
     if not members:
-        embed.description = "아무도 없네요 저 티나랑 놀아주세요\n`/신규등록`으로 블로그를 추가해주세요!"
+        embed.description = "아무도 없네요 저 티나랑 놀아주세요\n`/티스토리등록` 또는 `/벨로그등록`으로 블로그를 추가해주세요!"
     else:
         embed.description = "티나와 함께 꾸준히 기록을 남기고 있는 멤버들이에요. 다들 앞으로도 잘 부탁드려요!\n"
         for i, member in enumerate(members, 1):
+            platform_label = "티스토리" if member.get("platform") == "tistory" else "벨로그"
             embed.add_field(
-                name=f"{i}. {member['discord_name']}",
+                name=f"{i}. {member['discord_name']} ({platform_label})",
                 value=f"{member['blog_url']}",
                 inline=False
             )
@@ -488,11 +494,12 @@ def monthly_report_embed(year: int, month: int, member_stats: list[dict]) -> dis
     return embed
 
 
-def unregister_success_embed(user_name: str) -> discord.Embed:
+def unregister_success_embed(user_name: str, platform_name: str = "") -> discord.Embed:
     """등록 해제 성공 알림 Embed"""
+    platform_str = f" {platform_name}" if platform_name else ""
     return info_embed(
         "삭제 완료",
-        f"**{user_name}**님의 등록이 해제되었어요.\n\n이제 못 보게 되어 슬프지만...\n마음이 바뀌면 언제든 다시 돌아와 주실 거죠? 기다리고 있을게요!",
+        f"**{user_name}**님의{platform_str} 블로그 등록이 해제되었어요.\n\n이제 못 보게 되어 슬프지만...\n마음이 바뀌면 언제든 다시 돌아와 주실 거죠? 기다리고 있을게요!",
         color=COLOR_SUCCESS
     )
 
@@ -519,11 +526,24 @@ def not_registered_embed(user_name: str = None) -> discord.Embed:
     return error_embed(msg)
 
 
+def not_registered_platform_embed(platform_name: str) -> discord.Embed:
+    """특정 플랫폼에 등록되지 않은 경우 알림 Embed"""
+    return error_embed(f"{platform_name} 블로그가 등록되어 있지 않아요.")
+
+
 def invalid_tistory_url_embed() -> discord.Embed:
     """잘못된 티스토리 URL 알림 Embed"""
     return error_embed(
-        "유효한 티스토리 개인 블로그 주소를 입력해주세요!\n"
-        "EX) `https://아이디.tistory.com` 혹은 `아이디.tistory.com`"
+        "유효한 티스토리 주소를 입력해주세요!\n"
+        "예: `https://아이디.tistory.com` 혹은 `아이디.tistory.com`"
+    )
+
+
+def invalid_velog_url_embed() -> discord.Embed:
+    """잘못된 벨로그 URL 알림 Embed"""
+    return error_embed(
+        "유효한 벨로그 주소를 입력해주세요!\n"
+        "예: `https://velog.io/@아이디` 혹은 `velog.io/@아이디`"
     )
 
 
@@ -532,7 +552,7 @@ def no_members_embed(is_status: bool = False) -> discord.Embed:
     title = "현황 안내" if is_status else "알림"
     desc = "아무도 없네요 저 티나랑 놀아주세요"
     if is_status:
-        desc += "\n`/신규등록`으로 블로그를 추가해주세요!"
+        desc += "\n`/티스토리등록` 또는 `/벨로그등록`으로 블로그를 추가해주세요!"
     return info_embed(title, desc)
 
 
@@ -544,9 +564,9 @@ def system_error_embed() -> discord.Embed:
 def connection_error_embed(blog_url: str, status_code: int = None) -> discord.Embed:
     """블로그 접속 실패 알림 Embed"""
     if status_code:
-        desc = f"입력하신 블로그 주소({blog_url})에 접속할 수 없어요.\n주소가 정확한지 확인해주세요! (HTTP {status_code})"
+        desc = f"입력하신 블로그 주소에 접속할 수 없어요. (HTTP {status_code})\n{blog_url}"
     else:
-        desc = f"블로그({blog_url})에 연결할 수 없어요. 오타가 없는지 확인해주세요!"
+        desc = f"블로그에 연결할 수 없어요. 오타가 없는지 확인해주세요!\n{blog_url}"
     return error_embed(desc)
 
 
@@ -564,8 +584,8 @@ def welcome_embed(user_mention: str, reset_day: str = "월요일", reset_time: s
         timestamp=get_kst_now()
     )
     embed.add_field(
-        name="시작하기", 
-        value="`/신규등록` 명령어로 본인의 블로그를 등록해 보세요!\n티나가 꼼꼼하게 새 글을 감시해 드릴게요.", 
+        name="시작하기",
+        value="`/티스토리등록` 또는 `/벨로그등록` 명령어로 본인의 블로그를 등록해 보세요!\n티나가 꼼꼼하게 새 글을 감시해 드릴게요.",
         inline=False
     )
     embed.add_field(

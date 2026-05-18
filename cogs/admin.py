@@ -6,13 +6,15 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
-from utils.blog_utils import normalize_tistory_url, check_url_accessible, scan_and_save_existing_posts
+from utils.blog_utils import (
+    normalize_tistory_url, normalize_velog_url,
+    check_url_accessible, scan_and_save_existing_posts
+)
 from utils.time_utils import get_week_range, get_month_range, get_kst_now, KST
 from utils.embed_builder import (
-    status_embed, help_embed, member_list_embed,
     info_embed, error_embed, register_success_embed,
-    already_registered_embed, not_registered_embed,
-    invalid_tistory_url_embed, connection_error_embed,
+    already_registered_embed, not_registered_embed, not_registered_platform_embed,
+    invalid_tistory_url_embed, invalid_velog_url_embed, connection_error_embed,
     admin_only_embed, command_error_embed,
     penalty_change_embed,
     COLOR_ADMIN
@@ -69,19 +71,33 @@ class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="멤버신규등록", description="[관리자] 새 멤버를 등록합니다")
-    @app_commands.describe(
-        유저="등록할 디스코드 유저",
-        블로그="티스토리 블로그 주소 (예: https://example.tistory.com)"
-    )
+    # ===== 멤버 등록 =====
+
+    @app_commands.command(name="멤버티스토리등록", description="[관리자] 멤버의 티스토리 블로그를 등록합니다")
+    @app_commands.describe(유저="등록할 디스코드 유저", 블로그="티스토리 블로그 주소 (예: https://아이디.tistory.com)")
     @is_admin()
-    async def register_member(self, interaction: discord.Interaction, 유저: discord.Member, 블로그: str):
+    async def register_member_tistory(self, interaction: discord.Interaction, 유저: discord.Member, 블로그: str):
+        await self._admin_register_blog(interaction, 유저, 블로그, "tistory")
+
+    @app_commands.command(name="멤버벨로그등록", description="[관리자] 멤버의 벨로그를 등록합니다")
+    @app_commands.describe(유저="등록할 디스코드 유저", 블로그="벨로그 주소 (예: https://velog.io/@아이디)")
+    @is_admin()
+    async def register_member_velog(self, interaction: discord.Interaction, 유저: discord.Member, 블로그: str):
+        await self._admin_register_blog(interaction, 유저, 블로그, "velog")
+
+    async def _admin_register_blog(self, interaction: discord.Interaction, 유저: discord.Member, raw_url: str, platform: str):
         await interaction.response.defer()
 
-        blog_url = normalize_tistory_url(블로그)
-        if not blog_url:
-            await interaction.followup.send(embed=invalid_tistory_url_embed())
-            return
+        if platform == "tistory":
+            blog_url = normalize_tistory_url(raw_url)
+            if not blog_url:
+                await interaction.followup.send(embed=invalid_tistory_url_embed())
+                return
+        else:
+            blog_url = normalize_velog_url(raw_url)
+            if not blog_url:
+                await interaction.followup.send(embed=invalid_velog_url_embed())
+                return
 
         ok, status_code = await check_url_accessible(blog_url)
         if not ok:
@@ -89,15 +105,13 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild_id)
-        success = await db.add_member(guild_id, str(유저.id), 유저.display_name, blog_url)
+        success = await db.add_member(guild_id, str(유저.id), 유저.display_name, blog_url, platform)
         if not success:
             await interaction.followup.send(embed=already_registered_embed(유저.display_name))
             return
 
-        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
-        existing_count = 0
-        week_count = 0
-        month_count = 0
+        member = await db.get_member_by_discord_id(guild_id, str(유저.id), platform)
+        existing_count = week_count = month_count = 0
         if member:
             try:
                 existing_count = await scan_and_save_existing_posts(member, blog_url)
@@ -110,22 +124,36 @@ class Admin(commands.Cog):
                 logger.error("기존 글 스캔 실패 [%s]: %s", 유저.display_name, e)
 
         await interaction.followup.send(embed=register_success_embed(유저.mention, blog_url, existing_count, week_count, month_count, is_admin=True))
-        logger.info("멤버 등록: %s (기존 글 %d편, 이번주 %d편, 이번달 %d편)", 유저.display_name, existing_count, week_count, month_count)
+        logger.info("멤버 등록(%s): %s (기존 글 %d편, 이번주 %d편, 이번달 %d편)", platform, 유저.display_name, existing_count, week_count, month_count)
 
-    @app_commands.command(name="멤버삭제", description="[관리자] 멤버를 삭제합니다")
+    # ===== 멤버 삭제 =====
+
+    @app_commands.command(name="멤버티스토리삭제", description="[관리자] 멤버의 티스토리 블로그 등록을 해제합니다")
     @app_commands.describe(유저="삭제할 디스코드 유저")
     @is_admin()
-    async def remove_member(self, interaction: discord.Interaction, 유저: discord.Member):
+    async def remove_member_tistory(self, interaction: discord.Interaction, 유저: discord.Member):
+        await self._admin_unregister_blog(interaction, 유저, "tistory")
+
+    @app_commands.command(name="멤버벨로그삭제", description="[관리자] 멤버의 벨로그 등록을 해제합니다")
+    @app_commands.describe(유저="삭제할 디스코드 유저")
+    @is_admin()
+    async def remove_member_velog(self, interaction: discord.Interaction, 유저: discord.Member):
+        await self._admin_unregister_blog(interaction, 유저, "velog")
+
+    async def _admin_unregister_blog(self, interaction: discord.Interaction, 유저: discord.Member, platform: str):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
-        success = await db.remove_member(guild_id, str(유저.id))
+        success = await db.remove_member(guild_id, str(유저.id), platform)
+        platform_name = "티스토리" if platform == "tistory" else "벨로그"
 
         if success:
-            embed = info_embed("멤버 삭제 완료", f"**{유저.display_name}**님이 목록에서 삭제되었어요.", color=COLOR_ADMIN)
+            embed = info_embed("멤버 삭제 완료", f"**{유저.display_name}**님의 {platform_name} 블로그가 삭제되었어요.", color=COLOR_ADMIN)
             await interaction.followup.send(embed=embed)
-            logger.info("멤버 삭제: %s (Guild: %s)", 유저.display_name, guild_id)
+            logger.info("멤버 삭제(%s): %s (Guild: %s)", platform, 유저.display_name, guild_id)
         else:
-            await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
+            await interaction.followup.send(embed=not_registered_platform_embed(platform_name), ephemeral=True)
+
+    # ===== 채널 설정 =====
 
     @app_commands.command(name="채널설정", description="[관리자] 알림 채널을 설정합니다")
     @app_commands.describe(채널="알림을 보낼 채널")
@@ -137,13 +165,15 @@ class Admin(commands.Cog):
         await interaction.response.send_message(embed=embed)
         logger.info("알림 채널 설정: #%s (Guild: %s)", 채널.name, guild_id)
 
+    # ===== 벌금 관리 =====
+
     @app_commands.command(name="벌금설정", description="[관리자] 벌금 금액을 변경합니다")
     @app_commands.describe(금액="벌금 금액 (원)")
     @is_admin()
     async def set_penalty(self, interaction: discord.Interaction, 금액: int):
         if 금액 < 0:
             await interaction.response.send_message(
-                embed=error_embed("벌금 금액은 0 이상이어야 해요."), 
+                embed=error_embed("벌금 금액은 0 이상이어야 해요."),
                 ephemeral=True
             )
             return
@@ -200,17 +230,14 @@ class Admin(commands.Cog):
         logger.info("벌금 재개 (Guild: %s)", guild_id)
 
     @app_commands.command(name="벌금변경", description="[관리자] 멤버 벌금을 수동으로 조정합니다")
-    @app_commands.describe(
-        유저="대상 유저",
-        금액="조정할 금액 (양수: 추가, 음수: 차감)"
-    )
+    @app_commands.describe(유저="대상 유저", 금액="조정할 금액 (양수: 추가, 음수: 차감)")
     @is_admin()
     async def adjust_penalty(self, interaction: discord.Interaction, 유저: discord.Member, 금액: int):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
 
-        member = await db.get_member_by_discord_id(guild_id, str(유저.id))
-        if not member:
+        members = await db.get_members_by_discord_id(guild_id, str(유저.id))
+        if not members:
             await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
             return
 
@@ -218,7 +245,10 @@ class Admin(commands.Cog):
             await interaction.followup.send(embed=error_embed("0원은 조정할 수 없어요."), ephemeral=True)
             return
 
-        current_total = await db.get_total_penalty(member["id"])
+        current_total = 0
+        for m in members:
+            current_total += await db.get_total_penalty(m["id"])
+
         if 금액 < 0 and current_total + 금액 < 0:
             await interaction.followup.send(
                 embed=error_embed(f"차감 후 총 벌금이 음수가 됩니다. (현재: {current_total:,}원, 차감: {abs(금액):,}원)"),
@@ -228,9 +258,12 @@ class Admin(commands.Cog):
 
         r_day, r_hour, r_min = await db.get_reset_time(guild_id)
         week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
-        await db.add_penalty(member["id"], week_start, week_end, 금액)
+        await db.add_penalty(members[0]["id"], week_start, week_end, 금액)
 
-        new_total = await db.get_total_penalty(member["id"])
+        new_total = 0
+        for m in members:
+            new_total += await db.get_total_penalty(m["id"])
+
         await interaction.followup.send(embed=penalty_change_embed(유저.mention, 금액, new_total))
         logger.info("벌금 수동 조정: %s (%+d원 → 총 %d원)", 유저.display_name, 금액, new_total)
 
@@ -239,7 +272,7 @@ class Admin(commands.Cog):
             pass
         else:
             await interaction.response.send_message(
-                embed=command_error_embed(str(error)), 
+                embed=command_error_embed(str(error)),
                 ephemeral=True
             )
 
