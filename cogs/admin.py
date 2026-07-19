@@ -16,7 +16,7 @@ from utils.embed_builder import (
     already_registered_embed, not_registered_embed, not_registered_platform_embed,
     invalid_tistory_url_embed, invalid_velog_url_embed, connection_error_embed,
     admin_only_embed, command_error_embed,
-    penalty_change_embed,
+    penalty_change_embed, penalty_settle_embed, penalty_reset_embed,
     COLOR_ADMIN
 )
 
@@ -65,6 +65,28 @@ def is_admin():
             return False
         return True
     return app_commands.check(predicate)
+
+
+class _PenaltyResetConfirmView(discord.ui.View):
+    def __init__(self, guild_id: str, member_count: int):
+        super().__init__(timeout=30)
+        self.guild_id = guild_id
+        self.member_count = member_count
+
+    @discord.ui.button(label="확인 (삭제)", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await db.reset_penalties_for_guild(self.guild_id)
+        self.stop()
+        await interaction.response.edit_message(embed=penalty_reset_embed(self.member_count), view=None)
+        logger.info("벌금 완전 초기화 완료 (Guild: %s, 멤버 수: %d)", self.guild_id, self.member_count)
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(
+            embed=info_embed("취소됨", "벌금 초기화를 취소했어요.", color=COLOR_ADMIN),
+            view=None
+        )
 
 
 class Admin(commands.Cog):
@@ -266,6 +288,41 @@ class Admin(commands.Cog):
 
         await interaction.followup.send(embed=penalty_change_embed(유저.mention, 금액, new_total))
         logger.info("벌금 수동 조정: %s (%+d원 → 총 %d원)", 유저.display_name, 금액, new_total)
+
+    # ===== 벌금 초기화 =====
+
+    @app_commands.command(name="벌금정산", description="[관리자] 현재 미납 벌금을 정산 처리합니다 (누적 기록 유지)")
+    @is_admin()
+    async def settle_penalty(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        members = await db.get_all_members(guild_id)
+        if not members:
+            await interaction.response.send_message(embed=error_embed("등록된 멤버가 없어요."), ephemeral=True)
+            return
+
+        await db.settle_penalties_for_guild(guild_id)
+        member_count = len(set(m["discord_id"] for m in members))
+        await interaction.response.send_message(embed=penalty_settle_embed(member_count))
+        logger.info("벌금 정산 완료 (Guild: %s, 멤버 수: %d)", guild_id, member_count)
+
+    @app_commands.command(name="벌금초기화", description="[관리자] 모든 벌금 기록을 완전히 삭제합니다 (되돌릴 수 없음)")
+    @is_admin()
+    async def reset_penalty(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        members = await db.get_all_members(guild_id)
+        if not members:
+            await interaction.response.send_message(embed=error_embed("등록된 멤버가 없어요."), ephemeral=True)
+            return
+
+        view = _PenaltyResetConfirmView(guild_id, len(set(m["discord_id"] for m in members)))
+        await interaction.response.send_message(
+            embed=error_embed(
+                "⚠️ **정말로 모든 벌금 기록을 삭제할까요?**\n"
+                "이 작업은 누적 기록을 포함한 **모든 벌금 데이터**를 삭제하며, 되돌릴 수 없어요."
+            ),
+            view=view,
+            ephemeral=True
+        )
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure):

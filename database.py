@@ -55,6 +55,20 @@ async def init_db():
             )
         """)
     await _migrate_platform_if_needed()
+    await _migrate_settled_at_if_needed()
+
+
+async def _migrate_settled_at_if_needed():
+    """settled_at 컬럼 없는 기존 DB에 컬럼 추가 (최초 1회)"""
+    async with _pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='penalties' AND column_name='settled_at')"
+        )
+        if exists:
+            return
+        await conn.execute("ALTER TABLE penalties ADD COLUMN settled_at TIMESTAMP")
+        logger.info("penalties 테이블 settled_at 컬럼 마이그레이션 완료")
 
 
 async def _migrate_platform_if_needed():
@@ -225,10 +239,32 @@ async def get_penalties_for_member(member_id: int) -> list[dict]:
 async def get_total_penalty(member_id: int) -> int:
     async with _pool.acquire() as conn:
         val = await conn.fetchval(
-            "SELECT COALESCE(SUM(amount), 0) FROM penalties WHERE member_id = $1",
+            "SELECT COALESCE(SUM(amount), 0) FROM penalties WHERE member_id = $1 AND settled_at IS NULL",
             member_id
         )
         return val or 0
+
+
+async def settle_penalties_for_guild(guild_id: str) -> int:
+    """guild의 모든 미정산 벌금을 정산 처리. 정산된 레코드 수 반환"""
+    async with _pool.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE penalties SET settled_at = NOW()
+               WHERE member_id IN (SELECT id FROM members WHERE guild_id = $1)
+               AND settled_at IS NULL""",
+            guild_id
+        )
+        return int(result.split()[-1])
+
+
+async def reset_penalties_for_guild(guild_id: str) -> int:
+    """guild의 모든 벌금 기록 완전 삭제. 삭제된 레코드 수 반환"""
+    async with _pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM penalties WHERE member_id IN (SELECT id FROM members WHERE guild_id = $1)",
+            guild_id
+        )
+        return int(result.split()[-1])
 
 
 async def is_penalty_exists(member_id: int, week_start: str) -> bool:

@@ -12,6 +12,8 @@ from utils.time_utils import get_kst_now, KST
 import database as db
 from config import Config
 from utils.embed_builder import new_post_embed
+from utils.blog_utils import extract_entry_content
+from utils.summarizer import summarize
 
 logger = logging.getLogger(__name__)
 
@@ -162,11 +164,16 @@ class RSSMonitor(commands.Cog):
 
             if saved:
                 mention = f"<@{member['discord_id']}>"
+                content = extract_entry_content(entry)
+                summary = await summarize(title, content) if content else None
+                summary_failed = bool(content) and summary is None
                 embed = new_post_embed(
                     author_name=mention,
                     title=title,
                     link=link,
-                    published_at=published_str
+                    published_at=published_str,
+                    summary=summary,
+                    summary_failed=summary_failed,
                 )
                 await channel.send(embed=embed)
                 logger.info("새 글 감지: [%s] %s", member["discord_name"], title)
@@ -213,7 +220,13 @@ class RSSMonitor(commands.Cog):
                     saved = await db.add_post(member["id"], title, link, published_str)
                     if saved:
                         mention = f"<@{member['discord_id']}>"
-                        embed = new_post_embed(mention, title, link, published_str)
+                        content = extract_entry_content(entry)
+                        summary = await summarize(title, content) if content else None
+                        summary_failed = bool(content) and summary is None
+                        embed = new_post_embed(
+                            mention, title, link, published_str,
+                            summary=summary, summary_failed=summary_failed,
+                        )
                         await channel.send(embed=embed)
                         new_count += 1
             except Exception as e:

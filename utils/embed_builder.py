@@ -39,7 +39,14 @@ def bot_welcome_embed() -> discord.Embed:
     return embed
 
 
-def new_post_embed(author_name: str, title: str, link: str, published_at: str) -> discord.Embed:
+def new_post_embed(
+    author_name: str,
+    title: str,
+    link: str,
+    published_at: str,
+    summary: str | None = None,
+    summary_failed: bool = False,
+) -> discord.Embed:
     """새 블로그 글 알림 Embed"""
     embed = discord.Embed(
         title="새 블로그 글이 올라왔어요!",
@@ -50,6 +57,12 @@ def new_post_embed(author_name: str, title: str, link: str, published_at: str) -
     embed.add_field(name="제목", value=f"[{title}]({link})", inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
+
+    if summary:
+        embed.add_field(name="요약", value=_truncate_field(summary), inline=False)
+    elif summary_failed:
+        embed.add_field(name="요약", value="요약을 생성하지 못했어요.", inline=False)
+
     embed.set_footer(text="티나 • 블로그 포스팅 알림")
 
     return embed
@@ -331,6 +344,8 @@ def admin_help_embed(reset_day: str = "월요일", reset_time: str = "09:00", re
             "`/벌금정지 [날짜시간]` — 벌금 부과 일시정지 (날짜 지정 시 자동 해제)\n"
             "`/벌금재개` — 벌금 부과 재개\n"
             "`/벌금변경 [@유저] [금액]` — 벌금 수동 조정 (양수: 추가, 음수: 차감)\n"
+            "`/벌금정산` — 현재 미납 벌금 정산 처리 (누적 기록 유지)\n"
+            "`/벌금초기화` — 모든 벌금 기록 완전 삭제\n"
         ),
         inline=False
     )
@@ -421,6 +436,38 @@ def server_penalty_embed(penalties_by_member: list[dict], total_guild_penalty: i
     embed.add_field(name="서버 총 누적 벌금액", value=f"**{total_guild_penalty:,}원**", inline=False)
     embed.set_footer(text="티나 • 전체 벌금 현황")
 
+    return embed
+
+
+def penalty_settle_embed(member_count: int) -> discord.Embed:
+    """벌금 정산 완료 Embed"""
+    embed = discord.Embed(
+        title="벌금 정산 완료",
+        description=(
+            "현재까지의 벌금이 정산 처리되었어요.\n"
+            "누적 기록은 그대로 유지되며, 현재 미납 벌금은 **0원**으로 초기화되었어요."
+        ),
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+    embed.add_field(name="정산 대상 멤버 수", value=f"**{member_count}명**", inline=True)
+    embed.set_footer(text="티나 • 벌금 정산")
+    return embed
+
+
+def penalty_reset_embed(member_count: int) -> discord.Embed:
+    """벌금 완전 초기화 완료 Embed"""
+    embed = discord.Embed(
+        title="벌금 완전 초기화 완료",
+        description=(
+            "모든 벌금 기록이 완전히 삭제되었어요.\n"
+            "누적 기록을 포함한 모든 벌금이 **0원**으로 초기화되었어요."
+        ),
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+    embed.add_field(name="초기화 대상 멤버 수", value=f"**{member_count}명**", inline=True)
+    embed.set_footer(text="티나 • 벌금 초기화")
     return embed
 
 

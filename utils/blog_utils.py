@@ -14,6 +14,33 @@ logger = logging.getLogger(__name__)
 
 _IGNORE_PATTERNS = ('/category', '/tag', '/guestbook', '/manage')
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+_ENTITIES = {
+    "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">",
+    "&quot;": '"', "&#39;": "'", "&apos;": "'",
+}
+
+
+def extract_entry_content(entry) -> str:
+    """RSS entry에서 본문을 평문으로 추출. 없으면 빈 문자열 반환."""
+    raw = ""
+    content = entry.get("content")
+    if content:
+        try:
+            raw = content[0].get("value", "") or ""
+        except (IndexError, AttributeError, TypeError):
+            raw = ""
+    if not raw:
+        raw = entry.get("summary", "") or ""
+    if not raw:
+        return ""
+
+    text = _TAG_RE.sub(" ", raw)
+    for ent, ch in _ENTITIES.items():
+        text = text.replace(ent, ch)
+    return _WS_RE.sub(" ", text).strip()
+
 
 def normalize_tistory_url(raw_url: str) -> str | None:
     """티스토리 URL을 정규화. 유효하지 않으면 None 반환."""
