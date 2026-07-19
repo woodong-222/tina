@@ -624,8 +624,8 @@ def monthly_report_embed(year: int, month: int, member_stats: list[dict], best_p
 def leaderboard_embed(entries: list[dict]) -> discord.Embed:
     """누적 작성 명예의 전당 Embed"""
     embed = discord.Embed(
-        title="🏆 명예의 전당 (누적 작성)",
-        description="지금까지 가장 많이 작성한 멤버들이에요. 다들 대단해요!",
+        title="🏆 명예의 전당",
+        description="지금까지 한 주에 가장 많이 작성한 멤버들이에요. 다들 대단해요!",
         color=COLOR_ADMIN,
         timestamp=get_kst_now()
     )

@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 import asyncpg
 from config import Config
 
@@ -385,23 +386,35 @@ async def upsert_streak(guild_id: str, discord_id: str, current: int, best: int,
         )
 
 
-# ===== 리더보드 =====
+# ===== 리더보드 (명예의 전당) =====
 
-async def get_alltime_counts(guild_id: str) -> list[dict]:
-    """discord_id별 누적 작성 편수(is_initial=0). 편수>0만, 내림차순."""
+async def get_best_week_counts(guild_id: str) -> list[dict]:
+    """discord_id별 '단일 주 최다 작성 편수'(is_initial=0). 주 경계는 guild 리셋 요일/시간 기준.
+    편수>0만, 최고기록 내림차순. 동점은 discord_id로 결정적 정렬."""
+    weekday, hour, minute = await get_reset_time(guild_id)
+    # 리셋 순간이 월요일 00:00에 오도록 시프트할 오프셋 (date_trunc는 월요일 기준 주)
+    offset = timedelta(days=weekday, hours=hour, minutes=minute)
     async with _pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT m.discord_id,
-                      MAX(m.discord_name) AS discord_name,
-                      COUNT(p.id) AS post_count,
-                      MAX(p.published_at) AS reached_at
-               FROM members m
-               JOIN posts p ON p.member_id = m.id AND p.is_initial = 0
-               WHERE m.guild_id = $1
-               GROUP BY m.discord_id
-               HAVING COUNT(p.id) > 0
-               ORDER BY COUNT(p.id) DESC, MAX(p.published_at) ASC, m.discord_id ASC""",
-            guild_id
+            """SELECT w.discord_id,
+                      MAX(mm.discord_name) AS discord_name,
+                      MAX(w.cnt) AS post_count
+               FROM (
+                   SELECT m.discord_id AS discord_id,
+                          date_trunc('week', p.published_at::timestamp - $2::interval) AS wk,
+                          COUNT(*) AS cnt
+                   FROM posts p
+                   JOIN members m ON m.id = p.member_id
+                   WHERE m.guild_id = $1
+                     AND p.is_initial = 0
+                     AND p.published_at IS NOT NULL
+                   GROUP BY m.discord_id, date_trunc('week', p.published_at::timestamp - $2::interval)
+               ) w
+               JOIN members mm ON mm.discord_id = w.discord_id AND mm.guild_id = $1
+               GROUP BY w.discord_id
+               HAVING MAX(w.cnt) > 0
+               ORDER BY MAX(w.cnt) DESC, w.discord_id ASC""",
+            guild_id, offset
         )
         return [dict(row) for row in rows]
 

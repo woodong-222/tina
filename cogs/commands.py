@@ -266,7 +266,7 @@ class Commands(commands.Cog):
     async def leaderboard(self, interaction: discord.Interaction):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
-        entries = await db.get_alltime_counts(guild_id)
+        entries = await db.get_best_week_counts(guild_id)
         await interaction.followup.send(embed=leaderboard_embed(entries))
 
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
