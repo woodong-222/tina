@@ -195,9 +195,10 @@ class _HourSelect(discord.ui.Select):
 class _MinuteSelect(discord.ui.Select):
     def __init__(self, parent: "ResetTimeView"):
         self.parent_view = parent
+        minutes = sorted(set(range(0, 60, 5)) | {parent.minute})
         options = [
             discord.SelectOption(label=f"{m:02d}분", value=str(m), default=(m == parent.minute))
-            for m in range(0, 60, 5)
+            for m in minutes
         ]
         super().__init__(placeholder="분", options=options, row=2)
 
@@ -212,7 +213,7 @@ class ResetTimeView(_AdminView):
         self.guild_id = guild_id
         self.weekday = weekday
         self.hour = hour
-        self.minute = minute - (minute % 5)  # 5분 단위로 스냅
+        self.minute = minute  # 기존 값 보존(비-5분 단위도 유지)
         self.add_item(_WeekdaySelect(self))
         self.add_item(_HourSelect(self))
         self.add_item(_MinuteSelect(self))

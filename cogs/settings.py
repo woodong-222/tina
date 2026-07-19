@@ -15,6 +15,7 @@ class Settings(commands.Cog):
 
     @app_commands.command(name="설정", description="[관리자] 채널·초기화·벌금 설정을 한 곳에서 관리합니다")
     @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
     async def settings_panel(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(embed=admin_only_embed(), ephemeral=True)

@@ -57,6 +57,16 @@ async def init_db():
                 PRIMARY KEY(guild_id, key)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS streaks (
+                guild_id TEXT NOT NULL,
+                discord_id TEXT NOT NULL,
+                current INTEGER DEFAULT 0,
+                best INTEGER DEFAULT 0,
+                last_week TEXT,
+                PRIMARY KEY(guild_id, discord_id)
+            )
+        """)
     await _migrate_platform_if_needed()
     await _migrate_settled_at_if_needed()
     await _migrate_post_ai_columns_if_needed()
@@ -220,6 +230,7 @@ async def get_top_scored_post(guild_id: str, start_date: str, end_date: str) -> 
             """SELECT p.* FROM posts p
                JOIN members m ON p.member_id = m.id
                WHERE m.guild_id = $1
+                 AND p.is_initial = 0
                  AND p.score IS NOT NULL
                  AND p.published_at >= $2 AND p.published_at <= $3
                ORDER BY p.score DESC, p.published_at DESC
@@ -349,6 +360,52 @@ async def set_setting(guild_id: str, key: str, value: str):
         )
 
 
+# ===== 스트릭 =====
+
+async def get_streak(guild_id: str, discord_id: str) -> dict:
+    """해당 유저의 스트릭. 없으면 기본값(current=0, best=0)."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT current, best, last_week FROM streaks WHERE guild_id = $1 AND discord_id = $2",
+            guild_id, discord_id
+        )
+        if row:
+            return dict(row)
+        return {"current": 0, "best": 0, "last_week": None}
+
+
+async def upsert_streak(guild_id: str, discord_id: str, current: int, best: int, last_week: str):
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO streaks (guild_id, discord_id, current, best, last_week)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (guild_id, discord_id)
+               DO UPDATE SET current = EXCLUDED.current, best = EXCLUDED.best, last_week = EXCLUDED.last_week""",
+            guild_id, discord_id, current, best, last_week
+        )
+
+
+# ===== 리더보드 =====
+
+async def get_alltime_counts(guild_id: str) -> list[dict]:
+    """discord_id별 누적 작성 편수(is_initial=0). 편수>0만, 내림차순."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT m.discord_id,
+                      MAX(m.discord_name) AS discord_name,
+                      COUNT(p.id) AS post_count,
+                      MAX(p.published_at) AS reached_at
+               FROM members m
+               JOIN posts p ON p.member_id = m.id AND p.is_initial = 0
+               WHERE m.guild_id = $1
+               GROUP BY m.discord_id
+               HAVING COUNT(p.id) > 0
+               ORDER BY COUNT(p.id) DESC, MAX(p.published_at) ASC, m.discord_id ASC""",
+            guild_id
+        )
+        return [dict(row) for row in rows]
+
+
 # ===== 유틸 =====
 
 async def get_all_guild_ids() -> list[str]:
@@ -367,3 +424,4 @@ async def delete_all_guild_data(guild_id: str):
         )
         await conn.execute("DELETE FROM members WHERE guild_id = $1", guild_id)
         await conn.execute("DELETE FROM settings WHERE guild_id = $1", guild_id)
+        await conn.execute("DELETE FROM streaks WHERE guild_id = $1", guild_id)

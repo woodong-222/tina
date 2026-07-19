@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
-from utils.components import RegisterPlatformView, UnregisterView
+from utils.components import RegisterPlatformView, UnregisterView, _AdminView
 from utils.time_utils import get_week_range
 from utils.embed_builder import (
     info_embed, error_embed,
@@ -30,9 +30,9 @@ def is_admin():
     return app_commands.check(predicate)
 
 
-class _PenaltyResetConfirmView(discord.ui.View):
+class _PenaltyResetConfirmView(_AdminView):
     def __init__(self, guild_id: str, member_count: int):
-        super().__init__(timeout=30)
+        super().__init__(timeout=30)  # _AdminView: 관리자 interaction_check + on_timeout 비활성
         self.guild_id = guild_id
         self.member_count = member_count
 
@@ -164,6 +164,7 @@ class Admin(commands.Cog):
                 view=view,
                 ephemeral=True
             )
+            view.message = await interaction.original_response()
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure):

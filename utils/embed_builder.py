@@ -62,8 +62,8 @@ def bot_welcome_embed() -> discord.Embed:
         description=(
             "블로그 포스팅을 자동으로 감지하고 알려주는 봇이에요.\n\n"
             "**시작하려면 아래 명령어를 사용해주세요:**\n"
-            "1. `/채널설정 #채널` — 알림을 받을 채널 설정\n"
-            "2. `/멤버티스토리등록` / `/멤버벨로그등록 @유저 블로그URL` — 멤버 등록 (관리자 전용)\n"
+            "1. `/설정` — 알림 채널·초기화·벌금 설정 (관리자)\n"
+            "2. `/멤버등록 @유저` — 멤버 블로그 등록 (관리자), 본인은 `/등록`\n"
             "3. `/도움말` — 전체 사용법 보기"
         ),
         color=COLOR_SUCCESS,
@@ -152,6 +152,7 @@ def weekly_report_embed(
     penalty_amount: int,
     is_paused: bool = False,
     best_post: dict | None = None,
+    streaks: dict | None = None,
 ) -> discord.Embed:
     """주간 리포트 Embed"""
     embed = discord.Embed(
@@ -185,6 +186,15 @@ def weekly_report_embed(
     best_line = _best_post_line(best_post)
     if best_line:
         embed.add_field(name="🏆 티나가 뽑은 이번 주의 글", value=_truncate_field(best_line), inline=False)
+
+    if streaks:
+        streak_items = sorted(
+            ((did, c) for did, c in streaks.items() if c >= 2),
+            key=lambda x: x[1], reverse=True,
+        )
+        if streak_items:
+            lines = [f"🔥 <@{did}> — **{c}주 연속**" for did, c in streak_items]
+            embed.add_field(name="연속 작성 중", value=_truncate_field("\n".join(lines)), inline=False)
 
     embed.set_footer(text="티나 • 주간 리포트")
 
@@ -324,7 +334,7 @@ def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> di
 def _schedule_field_value(reset_day: str, reset_time: str, remind_day: str) -> str:
     return (
         f"• 주간 리포트: 매주 **{reset_day} {reset_time}**\n"
-        f"• 마감 리마인드: 매주 **{remind_day} {reset_time}**\n"
+        f"• 마감 리마인드: 매주 **{remind_day} {reset_time}** (개인 DM)\n"
         f"• 월간 리포트: 매달 **1일 {reset_time}**"
     )
 
@@ -345,6 +355,7 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
             "`/등록` — 내 블로그 등록 (티스토리/벨로그 선택 후 주소 입력)\n"
             "`/삭제` — 내 블로그 등록 해제\n"
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
+            "`/랭킹` — 누적 작성 명예의 전당\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/조회 [@유저]` — 이번 주 현황 / 포스팅 목록\n"
             "`/벌금 [@유저]` — 벌금 현황 조회\n"
@@ -410,7 +421,7 @@ def member_list_embed(members: list[dict]) -> discord.Embed:
     )
 
     if not members:
-        embed.description = "아무도 없네요 저 티나랑 놀아주세요\n`/티스토리등록` 또는 `/벨로그등록`으로 블로그를 추가해주세요!"
+        embed.description = "아무도 없네요 저 티나랑 놀아주세요\n`/등록`으로 블로그를 추가해주세요!"
     else:
         embed.description = "티나와 함께 꾸준히 기록을 남기고 있는 멤버들이에요. 다들 앞으로도 잘 부탁드려요!\n"
         for i, member in enumerate(members, 1):
@@ -610,6 +621,48 @@ def monthly_report_embed(year: int, month: int, member_stats: list[dict], best_p
     return embed
 
 
+def leaderboard_embed(entries: list[dict]) -> discord.Embed:
+    """누적 작성 명예의 전당 Embed"""
+    embed = discord.Embed(
+        title="🏆 명예의 전당 (누적 작성)",
+        description="지금까지 가장 많이 작성한 멤버들이에요. 다들 대단해요!",
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+
+    if not entries:
+        embed.add_field(name="순위", value="아직 작성된 글이 없어요.", inline=False)
+        embed.set_footer(text="티나 • 명예의 전당")
+        return embed
+
+    # 명예의 전당은 상위 3명만 (동점 공유 없이, 같은 편수는 먼저 달성한 사람이 위 = DB 정렬)
+    lines = []
+    for i, e in enumerate(entries[:3]):
+        cnt = e["post_count"]
+        name = e.get("discord_name", "알 수 없음")
+        lines.append(f"{_MEDALS[i]} **{name}** — **{cnt}편**")
+
+    embed.add_field(name="순위", value=_truncate_field("\n".join(lines)), inline=False)
+    embed.set_footer(text="티나 • 명예의 전당")
+    return embed
+
+
+def remind_dm_embed(guild_name: str, reset_day: str, reset_time: str) -> discord.Embed:
+    """마감 임박 개인 DM 리마인드 Embed"""
+    embed = discord.Embed(
+        title="⏰ 블로그 마감 리마인드!",
+        description=(
+            f"**{guild_name}** 서버 알림이에요.\n"
+            f"이번 주 아직 글을 안 쓰셨어요! 마감은 **{reset_day} {reset_time}**예요.\n"
+            "오늘 안에 꼭 올려주세요. 티나가 응원할게요!"
+        ),
+        color=COLOR_INFO,
+        timestamp=get_kst_now()
+    )
+    embed.set_footer(text="티나 • 마감 리마인드")
+    return embed
+
+
 def unregister_success_embed(user_name: str, platform_name: str = "") -> discord.Embed:
     """등록 해제 성공 알림 Embed"""
     platform_str = f" {platform_name}" if platform_name else ""
@@ -668,7 +721,7 @@ def no_members_embed(is_status: bool = False) -> discord.Embed:
     title = "현황 안내" if is_status else "알림"
     desc = "아무도 없네요 저 티나랑 놀아주세요"
     if is_status:
-        desc += "\n`/티스토리등록` 또는 `/벨로그등록`으로 블로그를 추가해주세요!"
+        desc += "\n`/등록`으로 블로그를 추가해주세요!"
     return info_embed(title, desc)
 
 
@@ -701,7 +754,7 @@ def welcome_embed(user_mention: str, reset_day: str = "월요일", reset_time: s
     )
     embed.add_field(
         name="시작하기",
-        value="`/티스토리등록` 또는 `/벨로그등록` 명령어로 본인의 블로그를 등록해 보세요!\n티나가 꼼꼼하게 새 글을 감시해 드릴게요.",
+        value="`/등록` 명령어로 본인의 블로그를 등록해 보세요!\n티나가 꼼꼼하게 새 글을 감시해 드릴게요.",
         inline=False
     )
     embed.add_field(

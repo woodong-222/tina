@@ -12,6 +12,7 @@ from utils.embed_builder import (
     refresh_embed, info_embed,
     not_registered_embed,
     no_members_embed, system_error_embed, post_list_embed,
+    leaderboard_embed,
 )
 
 logger = logging.getLogger(__name__)
@@ -260,6 +261,14 @@ class Commands(commands.Cog):
 
     # ===== 멤버목록 =====
 
+    @app_commands.command(name="랭킹", description="누적 작성 편수 명예의 전당을 확인합니다")
+    @app_commands.guild_only()
+    async def leaderboard(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+        entries = await db.get_alltime_counts(guild_id)
+        await interaction.followup.send(embed=leaderboard_embed(entries))
+
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
     async def list_members(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -276,8 +285,6 @@ class Commands(commands.Cog):
 
         embed = member_list_embed(members)
         await interaction.followup.send(embed=embed)
-
-    # ===== 초기화설정 =====
 
 
 async def setup(bot: commands.Bot):

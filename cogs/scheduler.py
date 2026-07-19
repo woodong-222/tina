@@ -1,14 +1,14 @@
 import logging
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import aiohttp
 import xml.etree.ElementTree as ET
 import re
 
 import database as db
 from utils.time_utils import get_week_range, get_last_week_range, get_last_month_range, get_kst_now, KST
-from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_embed, monthly_report_embed
+from utils.embed_builder import weekly_report_embed, remind_dm_embed, missed_post_embed, monthly_report_embed
 from utils.blog_utils import parse_published_at_from_html, _IGNORE_PATTERNS
 
 logger = logging.getLogger(__name__)
@@ -147,8 +147,30 @@ class Scheduler(commands.Cog):
                     await db.add_penalty(first_member_id, week_start, week_end, penalty_amount)
                     logger.info("벌금 부과: %s (%s원)", stat["discord_name"], penalty_amount)
 
+        # 스트릭 갱신. 이번 주 이미 처리됐으면 재증가 안 함(idempotent).
+        # 연속은 직전 주(정확히 1주 전)에 갱신됐을 때만 이어지고, 공백이 있으면 새로 시작.
+        prev_week_start = (
+            datetime.strptime(week_start, "%Y-%m-%d %H:%M:%S") - timedelta(days=7)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        streaks = {}
+        for stat in member_stats:
+            did = stat["discord_id"]
+            s = await db.get_streak(guild_id, did)
+            if s["last_week"] == week_start:
+                current = s["current"]  # 이미 이번 주 처리됨
+            else:
+                if stat["post_count"] == 0:
+                    current = 0
+                elif s["last_week"] == prev_week_start:
+                    current = s["current"] + 1  # 직전 주에 이어서 연속
+                else:
+                    current = 1  # 공백 후 새 연속 시작
+                best_streak = max(s["best"], current)
+                await db.upsert_streak(guild_id, did, current, best_streak, week_start)
+            streaks[did] = current
+
         best = await db.get_top_scored_post(guild_id, week_start, week_end)
-        embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused, best_post=best)
+        embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused, best_post=best, streaks=streaks)
         await channel.send(embed=embed)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
@@ -157,8 +179,8 @@ class Scheduler(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _send_remind(self, guild_id: str, r_day: int, r_hour: int, r_min: int):
-        channel = await self._resolve_channel(guild_id)
-        if not channel:
+        guild = self.bot.get_guild(int(guild_id))
+        if not guild:
             return
 
         week_start, week_end = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
@@ -169,18 +191,28 @@ class Scheduler(commands.Cog):
         for member in members:
             did = member["discord_id"]
             count = await db.get_post_count_in_range(member["id"], week_start, week_end)
-            if did not in counts_by_discord:
-                counts_by_discord[did] = {"member": member, "count": 0}
-            counts_by_discord[did]["count"] += count
+            counts_by_discord[did] = counts_by_discord.get(did, 0) + count
 
-        members_without_posts = [v["member"] for v in counts_by_discord.values() if v["count"] == 0]
-
-        if not members_without_posts:
+        without = [did for did, c in counts_by_discord.items() if c == 0]
+        if not without:
             return
 
-        embed = remind_embed(members_without_posts)
-        await channel.send(embed=embed)
-        logger.info("리마인드 발송 완료 [Guild: %s] (대상: %d명)", guild_id, len(members_without_posts))
+        days = ["월", "화", "수", "목", "금", "토", "일"]
+        reset_day_str = f"{days[r_day]}요일"
+        reset_time_str = f"{r_hour:02d}:{r_min:02d}"
+
+        sent = 0
+        for did in without:
+            gm = guild.get_member(int(did))
+            if not gm:
+                continue
+            try:
+                await gm.send(embed=remind_dm_embed(guild.name, reset_day_str, reset_time_str))
+                sent += 1
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.info("마감 리마인드 DM 실패(차단/오류) [%s]: %s", did, e)
+
+        logger.info("마감 리마인드 DM 발송 [Guild: %s] (%d/%d명)", guild_id, sent, len(without))
 
     @tasks.loop(time=SCAN_TIME)
     async def daily_sitemap_scan(self):
