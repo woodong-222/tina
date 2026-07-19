@@ -6,7 +6,7 @@
 도커가 설치된 환경에서 다음 명령어를 입력하여 실행합니다.
 
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## 환경 변수 설정 (.env)
