@@ -11,17 +11,6 @@ class Events(commands.Cog):
         self.bot = bot
 
     @commands.Cog.listener()
-    async def on_ready(self):
-        """봇 시작 시 오프라인 중 퇴장된 서버 데이터 정리"""
-        bot_guild_ids = {str(g.id) for g in self.bot.guilds}
-        db_guild_ids = await db.get_all_guild_ids()
-
-        for guild_id in db_guild_ids:
-            if guild_id not in bot_guild_ids:
-                await db.delete_all_guild_data(guild_id)
-                logger.info("오프라인 중 퇴장된 서버 데이터 삭제 [Guild: %s]", guild_id)
-
-    @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         """봇이 서버에서 퇴장하거나 서버가 삭제될 때 DB 데이터 전체 삭제"""
         guild_id = str(guild.id)
