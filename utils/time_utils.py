@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -56,6 +57,45 @@ def get_last_month_range() -> tuple[str, str]:
     first_of_this_month = get_kst_now().replace(day=1)
     last_day_of_prev_month = first_of_this_month - timedelta(days=1)
     return get_month_range(last_day_of_prev_month)
+
+
+def parse_pause_until(date_str: str) -> datetime | None:
+    """벌금 정지 해제 일시 파싱. '5월 11일 09:00' / '5/11 09:00' / '2026-05-11 09:00' 지원.
+    형식 전체 일치(fullmatch)만 허용하고, 과거 일시는 무효(None)로 처리."""
+    now = get_kst_now()
+    year = now.year
+    s = date_str.strip()
+    dt = None
+
+    m = re.fullmatch(r'(\d{1,2})월\s*(\d{1,2})일(?:\s+(\d{1,2}):(\d{2}))?', s)
+    if m:
+        try:
+            dt = datetime(year, int(m.group(1)), int(m.group(2)),
+                          int(m.group(3) or 0), int(m.group(4) or 0), tzinfo=KST)
+        except ValueError:
+            return None
+
+    if dt is None:
+        m = re.fullmatch(r'(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?', s)
+        if m:
+            try:
+                dt = datetime(year, int(m.group(1)), int(m.group(2)),
+                              int(m.group(3) or 0), int(m.group(4) or 0), tzinfo=KST)
+            except ValueError:
+                return None
+
+    if dt is None:
+        m = re.fullmatch(r'(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?', s)
+        if m:
+            try:
+                dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                              int(m.group(4) or 0), int(m.group(5) or 0), tzinfo=KST)
+            except ValueError:
+                return None
+
+    if dt is None or dt <= now:
+        return None
+    return dt
 
 
 def format_date_range(start: str, end: str) -> str:

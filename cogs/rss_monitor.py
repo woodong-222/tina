@@ -166,7 +166,7 @@ class RSSMonitor(commands.Cog):
                 mention = f"<@{member['discord_id']}>"
                 content = extract_entry_content(entry)
                 summary = await summarize(title, content) if content else None
-                summary_failed = bool(content) and summary is None
+                summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and summary is None
                 embed = new_post_embed(
                     author_name=mention,
                     title=title,
@@ -222,7 +222,7 @@ class RSSMonitor(commands.Cog):
                         mention = f"<@{member['discord_id']}>"
                         content = extract_entry_content(entry)
                         summary = await summarize(title, content) if content else None
-                        summary_failed = bool(content) and summary is None
+                        summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and summary is None
                         embed = new_post_embed(
                             mention, title, link, published_str,
                             summary=summary, summary_failed=summary_failed,

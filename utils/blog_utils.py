@@ -28,11 +28,13 @@ def extract_entry_content(entry) -> str:
     content = entry.get("content")
     if content:
         try:
-            raw = content[0].get("value", "") or ""
+            val = content[0].get("value", "")
+            raw = val if isinstance(val, str) else ""
         except (IndexError, AttributeError, TypeError):
             raw = ""
     if not raw:
-        raw = entry.get("summary", "") or ""
+        val = entry.get("summary", "")
+        raw = val if isinstance(val, str) else ""
     if not raw:
         return ""
 

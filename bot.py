@@ -54,6 +54,7 @@ COGS = [
     "cogs.commands",
     "cogs.admin",
     "cogs.events",
+    "cogs.settings",
 ]
 
 

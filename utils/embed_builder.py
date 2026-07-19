@@ -32,17 +32,22 @@ def _rank_lines(member_stats: list[dict], *, with_penalty: bool) -> str:
     if not member_stats:
         return _EMPTY_MSG
 
-    # 안정 정렬: 동점은 입력 순서 유지
-    ranked = sorted(member_stats, key=lambda s: s["post_count"], reverse=True)
+    # 편수 내림차순, 동점은 discord_id로 결정적 2차 정렬
+    ranked = sorted(member_stats, key=lambda s: (-s["post_count"], str(s["discord_id"])))
 
     lines = []
-    medal_idx = 0
+    rank = 0          # 실제 등수(동점 공유, 1부터)
+    prev_count = None
+    seen = 0          # 지금까지 본 작성자 수 (동점 등수 계산용)
     for stat in ranked:
         count = stat["post_count"]
         mention = f"<@{stat['discord_id']}>"
         if count > 0:
-            icon = _MEDALS[medal_idx] if medal_idx < len(_MEDALS) else _ICON_WROTE
-            medal_idx += 1
+            seen += 1
+            if count != prev_count:
+                rank = seen  # 동점이 아니면 등수 = 순번
+            prev_count = count
+            icon = _MEDALS[rank - 1] if rank - 1 < len(_MEDALS) else _ICON_WROTE
             lines.append(f"{icon} {mention} — **{count}편**")
         else:
             suffix = " (벌금)" if with_penalty else ""
@@ -83,7 +88,7 @@ def new_post_embed(
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
-    embed.add_field(name="제목", value=f"[{title}]({link})", inline=False)
+    embed.add_field(name="제목", value=_truncate_field(f"[{title}]({link})"), inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
 
@@ -105,7 +110,7 @@ def missed_post_embed(author_name: str, title: str, link: str, published_at: str
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
-    embed.add_field(name="제목", value=f"[{title}]({link})", inline=False)
+    embed.add_field(name="제목", value=_truncate_field(f"[{title}]({link})"), inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
     embed.set_footer(text="티나 • 누락 감지")
@@ -145,7 +150,7 @@ def weekly_report_embed(
     elif penalty_members:
         embed.add_field(
             name=f"💰 벌금 대상 ({penalty_amount:,}원)",
-            value=", ".join(penalty_members),
+            value=_truncate_field(", ".join(penalty_members)),
             inline=False
         )
 
@@ -305,10 +310,8 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
         name="📊 일반 명령어",
         value=(
             "*(명령어 뒤에 `@유저`를 지정하지 않으면 전체를 보여줍니다)*\n"
-            "`/티스토리등록 [블로그주소]` — 티스토리 블로그 등록\n"
-            "`/벨로그등록 [블로그주소]` — 벨로그 등록\n"
-            "`/티스토리삭제` — 티스토리 블로그 등록 해제\n"
-            "`/벨로그삭제` — 벨로그 등록 해제\n"
+            "`/등록` — 내 블로그 등록 (티스토리/벨로그 선택 후 주소 입력)\n"
+            "`/삭제` — 내 블로그 등록 해제\n"
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/조회 [@유저]` — 이번 주 현황 / 포스팅 목록\n"
@@ -347,17 +350,11 @@ def admin_help_embed(reset_day: str = "월요일", reset_time: str = "09:00", re
     embed.add_field(
         name="관리 명령어",
         value=(
-            "`/멤버티스토리등록 [@유저] 블로그URL` — 멤버 티스토리 대리 등록\n"
-            "`/멤버벨로그등록 [@유저] 블로그URL` — 멤버 벨로그 대리 등록\n"
-            "`/멤버티스토리삭제 [@유저]` — 멤버 티스토리 대리 삭제\n"
-            "`/멤버벨로그삭제 [@유저]` — 멤버 벨로그 대리 삭제\n"
-            "`/채널설정 [#채널]` — 알림 채널 변경\n"
-            "`/벌금설정 [금액]` — 벌금 금액 변경\n"
-            "`/벌금정지 [날짜시간]` — 벌금 부과 일시정지 (날짜 지정 시 자동 해제)\n"
-            "`/벌금재개` — 벌금 부과 재개\n"
+            "`/설정` — 통합 설정 패널 (알림 채널·초기화 요일/시간·벌금 금액·벌금 정지/재개)\n"
+            "`/멤버등록 [@유저]` — 멤버 블로그 대리 등록 (플랫폼 선택)\n"
+            "`/멤버삭제 [@유저]` — 멤버 블로그 대리 삭제\n"
             "`/벌금변경 [@유저] [금액]` — 벌금 수동 조정 (양수: 추가, 음수: 차감)\n"
-            "`/벌금정산` — 현재 미납 벌금 정산 처리 (누적 기록 유지)\n"
-            "`/벌금초기화` — 모든 벌금 기록 완전 삭제\n"
+            "`/벌금정리 [작업]` — 벌금 정산(누적 유지) 또는 초기화(완전 삭제)\n"
         ),
         inline=False
     )

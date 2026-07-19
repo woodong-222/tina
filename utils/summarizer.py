@@ -50,8 +50,7 @@ async def summarize(title: str, content: str) -> str | None:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 if resp.status != 200:
-                    body = await resp.text()
-                    logger.warning("Gemini 요약 HTTP %d: %s", resp.status, body[:200])
+                    logger.warning("Gemini 요약 HTTP %d", resp.status)
                     return None
                 data = await resp.json()
 
