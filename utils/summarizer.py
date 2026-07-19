@@ -37,7 +37,13 @@ async def summarize(title: str, content: str) -> str | None:
     }
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300},
+        "generationConfig": {
+            "temperature": 0.3,
+            # maxOutputTokens는 thinking+출력 합산 예산(Gemini 3.x) → 넉넉히
+            "maxOutputTokens": 2048,
+            # 3.x는 thinking 완전 비활성 불가 → 최소 수준으로
+            "thinkingConfig": {"thinkingLevel": "low"},
+        },
     }
 
     try:
@@ -55,7 +61,12 @@ async def summarize(title: str, content: str) -> str | None:
         logger.warning("Gemini 요약 요청 실패: %s", e)
         return None
     except (KeyError, IndexError, TypeError) as e:
-        logger.warning("Gemini 요약 응답 파싱 실패: %s", e)
+        finish = None
+        try:
+            finish = data["candidates"][0].get("finishReason")
+        except Exception:
+            pass
+        logger.warning("Gemini 요약 응답 파싱 실패: %s (finishReason=%s)", e, finish)
         return None
     except Exception as e:
         logger.warning("Gemini 요약 알 수 없는 오류: %s", e)

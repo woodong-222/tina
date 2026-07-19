@@ -8,7 +8,7 @@ import re
 
 import database as db
 from utils.time_utils import get_week_range, get_last_week_range, get_last_month_range, get_kst_now, KST
-from utils.embed_builder import weekly_report_embed, weekly_report_status_text, remind_embed, missed_post_embed, monthly_report_embed
+from utils.embed_builder import weekly_report_embed, remind_embed, missed_post_embed, monthly_report_embed
 from utils.blog_utils import parse_published_at_from_html, _IGNORE_PATTERNS
 
 logger = logging.getLogger(__name__)
@@ -148,9 +148,7 @@ class Scheduler(commands.Cog):
                     logger.info("벌금 부과: %s (%s원)", stat["discord_name"], penalty_amount)
 
         embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused)
-        status_text = weekly_report_status_text(week_start, week_end, member_stats, is_paused)
         await channel.send(embed=embed)
-        await channel.send(status_text)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
     @main_scheduler.before_loop

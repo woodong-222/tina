@@ -20,6 +20,35 @@ COLOR_ADMIN = 0xF1C40F    # 노란색 (관리자 명령어 성공)
 COLOR_INFO = 0x3498DB     # 파란색 (주기적 알림/정보)
 COLOR_HELP = 0xFFB6C1     # 핑크색 (도움말)
 
+# 아이콘 체계
+_MEDALS = ("🥇", "🥈", "🥉")
+_ICON_WROTE = "🔹"   # 4위 이하 작성자(편수>0)
+_ICON_NONE = "🔴"    # 미작성(0편)
+_EMPTY_MSG = "아무도 없네요 저 티나랑 놀아주세요"
+
+
+def _rank_lines(member_stats: list[dict], *, with_penalty: bool) -> str:
+    """편수 내림차순 메달 순위 라인 생성. with_penalty=True면 0편에 '(벌금)' 접미."""
+    if not member_stats:
+        return _EMPTY_MSG
+
+    # 안정 정렬: 동점은 입력 순서 유지
+    ranked = sorted(member_stats, key=lambda s: s["post_count"], reverse=True)
+
+    lines = []
+    medal_idx = 0
+    for stat in ranked:
+        count = stat["post_count"]
+        mention = f"<@{stat['discord_id']}>"
+        if count > 0:
+            icon = _MEDALS[medal_idx] if medal_idx < len(_MEDALS) else _ICON_WROTE
+            medal_idx += 1
+            lines.append(f"{icon} {mention} — **{count}편**")
+        else:
+            suffix = " (벌금)" if with_penalty else ""
+            lines.append(f"{_ICON_NONE} {mention} — **0편**{suffix}")
+    return "\n".join(lines)
+
 
 def bot_welcome_embed() -> discord.Embed:
     """봇이 서버에 처음 입장했을 때 전송하는 환영 메시지"""
@@ -93,24 +122,29 @@ def weekly_report_embed(
 ) -> discord.Embed:
     """주간 리포트 Embed"""
     embed = discord.Embed(
-        title=f"주간 블로그 리포트 ({format_date_range(week_start, week_end)})",
-        description="지난 한 주 동안 다들 고생 많으셨어요! 이번 주 최종 리포트를 확인해볼게요.",
+        title=f"🏆 주간 블로그 리포트 ({format_date_range(week_start, week_end)})",
+        description="지난 한 주 동안 다들 고생 많으셨어요! 이번 주 최종 순위를 확인해볼게요.",
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
 
-    penalty_members = []
-    for stat in member_stats:
-        count = stat["post_count"]
-        mention = f"<@{stat['discord_id']}>"
-        if count == 0 and not is_paused:
-            penalty_members.append(mention)
+    embed.add_field(
+        name="작성 순위",
+        value=_truncate_field(_rank_lines(member_stats, with_penalty=not is_paused)),
+        inline=False,
+    )
+
+    penalty_members = [
+        f"<@{stat['discord_id']}>"
+        for stat in member_stats
+        if stat["post_count"] == 0 and not is_paused
+    ]
 
     if is_paused:
         embed.add_field(name="벌금 정지", value="이번 주는 벌금이 정지되었어요.", inline=False)
     elif penalty_members:
         embed.add_field(
-            name=f"벌금 대상 ({penalty_amount:,}원)",
+            name=f"💰 벌금 대상 ({penalty_amount:,}원)",
             value=", ".join(penalty_members),
             inline=False
         )
@@ -118,30 +152,6 @@ def weekly_report_embed(
     embed.set_footer(text="티나 • 주간 리포트")
 
     return embed
-
-
-def weekly_report_status_text(
-    week_start: str,
-    week_end: str,
-    member_stats: list[dict],
-    is_paused: bool = False,
-) -> str:
-    """주간 리포트 작성 현황 plain text (embed 글자 제한 우회)"""
-    lines = ["**작성 현황**"]
-    for stat in member_stats:
-        count = stat["post_count"]
-        mention = f"<@{stat['discord_id']}>"
-        posts = stat.get("posts", [])
-        if count > 0:
-            lines.append(f"🟢 {mention} — **{count}편** 작성")
-            for p in posts:
-                lines.append(f"　 ↳ [{p['title']}]({p['link']})")
-        else:
-            if is_paused:
-                lines.append(f"🔴 {mention} — **0편**")
-            else:
-                lines.append(f"🔴 {mention} — **0편** (벌금 부과)")
-    return "\n".join(lines) if len(lines) > 1 else "아무도 없네요 저 티나랑 놀아주세요"
 
 
 def post_list_embed(
@@ -199,23 +209,24 @@ def server_stats_embed(
 ) -> discord.Embed:
     """전체 서버 멤버 통계 Embed"""
     embed = discord.Embed(
-        title="전체 멤버 블로그 통계",
+        title="📊 전체 멤버 블로그 통계",
         description=f"우리 멤버들이 함께 작성한 포스팅 통계예요.\n\n이번 주: {week_range}\n이번 달: {month_range}",
         color=COLOR_ADMIN,
         timestamp=get_kst_now()
     )
 
+    ranked = sorted(member_stats, key=lambda s: s["week_count"], reverse=True)
     lines = []
-    for stat in member_stats:
+    for stat in ranked:
         name = stat.get("discord_name", "알 수 없음")
         week_c = stat["week_count"]
         month_c = stat["month_count"]
         pen = stat["total_penalty"]
-        lines.append(f"**{name}** - 주: **{week_c}편** | 월: **{month_c}편** | 벌금: **{pen:,}원**")
+        lines.append(f"**{name}** — 주 **{week_c}편** · 월 **{month_c}편** · 벌금 **{pen:,}원**")
 
     embed.add_field(
         name="멤버별 요약",
-        value="\n".join(lines) if lines else "아무도 없네요 저 티나랑 놀아주세요",
+        value=_truncate_field("\n".join(lines)) if lines else _EMPTY_MSG,
         inline=False
     )
     embed.set_footer(text="티나 • 전체 통계")
@@ -249,14 +260,15 @@ def stats_embed(
 def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> discord.Embed:
     """이번 주 현황 Embed"""
     embed = discord.Embed(
-        title=f"이번 주 현황 ({format_date_range(week_start, week_end)})",
+        title=f"📊 이번 주 현황 ({format_date_range(week_start, week_end)})",
         description="이번 주 블로그 작성 현황이에요.",
         color=COLOR_SUCCESS,
         timestamp=get_kst_now()
     )
 
+    ranked = sorted(member_stats, key=lambda s: s["post_count"], reverse=True)
     lines = []
-    for stat in member_stats:
+    for stat in ranked:
         count = stat["post_count"]
         name = stat.get("discord_name", "알 수 없음")
         icon = "🟢" if count > 0 else "🔴"
@@ -264,7 +276,7 @@ def status_embed(week_start: str, week_end: str, member_stats: list[dict]) -> di
 
     embed.add_field(
         name="작성 현황",
-        value="\n".join(lines) if lines else "아무도 없네요 저 티나랑 놀아주세요",
+        value=_truncate_field("\n".join(lines)) if lines else _EMPTY_MSG,
         inline=False
     )
     embed.set_footer(text="티나 • 현황")
@@ -549,22 +561,16 @@ def register_success_embed(
 def monthly_report_embed(year: int, month: int, member_stats: list[dict]) -> discord.Embed:
     """월간 리포트 Embed"""
     embed = discord.Embed(
-        title=f"{year}년 {month}월 월간 블로그 리포트",
-        description="지난 한 달 동안 모두 고생 많으셨어요! 이번 달 최종 기록을 확인해볼게요.",
+        title=f"🏆 {year}년 {month}월 월간 블로그 리포트",
+        description="지난 한 달 동안 모두 고생 많으셨어요! 이번 달 최종 순위를 확인해볼게요.",
         color=COLOR_INFO,
         timestamp=get_kst_now()
     )
-    lines = []
-    for stat in member_stats:
-        mention = f"<@{stat['discord_id']}>"
-        count = stat["post_count"]
-        icon = "🟢" if count > 0 else "🔴"
-        lines.append(f"{icon} {mention} — **{count}편**")
 
     embed.add_field(
-        name="멤버별 작성 현황",
-        value="\n".join(lines) if lines else "아무도 없네요 저 티나랑 놀아주세요",
-        inline=False
+        name="작성 순위",
+        value=_truncate_field(_rank_lines(member_stats, with_penalty=False)),
+        inline=False,
     )
     embed.set_footer(text="티나 • 월간 리포트")
     return embed
