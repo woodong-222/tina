@@ -33,6 +33,9 @@ async def init_db():
                 published_at TEXT,
                 detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_initial INTEGER DEFAULT 0,
+                summary TEXT,
+                tags TEXT,
+                score INTEGER,
                 UNIQUE(member_id, link)
             )
         """)
@@ -56,6 +59,7 @@ async def init_db():
         """)
     await _migrate_platform_if_needed()
     await _migrate_settled_at_if_needed()
+    await _migrate_post_ai_columns_if_needed()
 
 
 async def _migrate_settled_at_if_needed():
@@ -69,6 +73,21 @@ async def _migrate_settled_at_if_needed():
             return
         await conn.execute("ALTER TABLE penalties ADD COLUMN settled_at TIMESTAMP")
         logger.info("penalties 테이블 settled_at 컬럼 마이그레이션 완료")
+
+
+async def _migrate_post_ai_columns_if_needed():
+    """posts 테이블에 AI 요약/태그/점수 컬럼 추가 (최초 1회)"""
+    async with _pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='posts' AND column_name='score')"
+        )
+        if exists:
+            return
+        await conn.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS summary TEXT")
+        await conn.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS tags TEXT")
+        await conn.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS score INTEGER")
+        logger.info("posts 테이블 AI 컬럼(summary/tags/score) 마이그레이션 완료")
 
 
 async def _migrate_platform_if_needed():
@@ -180,16 +199,34 @@ async def is_post_exists(link: str, member_id: int) -> bool:
         return row is not None
 
 
-async def add_post(member_id: int, title: str, link: str, published_at: str, is_initial: bool = False) -> bool:
+async def add_post(member_id: int, title: str, link: str, published_at: str, is_initial: bool = False,
+                   summary: str = None, tags: str = None, score: int = None) -> bool:
     try:
         async with _pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO posts (member_id, title, link, published_at, is_initial) VALUES ($1, $2, $3, $4, $5)",
-                member_id, title, link, published_at, 1 if is_initial else 0
+                "INSERT INTO posts (member_id, title, link, published_at, is_initial, summary, tags, score) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                member_id, title, link, published_at, 1 if is_initial else 0, summary, tags, score
             )
             return True
     except asyncpg.UniqueViolationError:
         return False
+
+
+async def get_top_scored_post(guild_id: str, start_date: str, end_date: str) -> dict | None:
+    """해당 guild 멤버들의 posts 중 기간 내 score 최고 1건(동점 시 최신). 점수 있는 글만."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT p.* FROM posts p
+               JOIN members m ON p.member_id = m.id
+               WHERE m.guild_id = $1
+                 AND p.score IS NOT NULL
+                 AND p.published_at >= $2 AND p.published_at <= $3
+               ORDER BY p.score DESC, p.published_at DESC
+               LIMIT 1""",
+            guild_id, start_date, end_date
+        )
+        return dict(row) if row else None
 
 
 async def get_posts_in_range(member_id: int, start_date: str, end_date: str) -> list[dict]:

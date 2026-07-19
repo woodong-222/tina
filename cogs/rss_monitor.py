@@ -155,24 +155,32 @@ class RSSMonitor(commands.Cog):
             except Exception:
                 published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
+            content = extract_entry_content(entry)
+            result = await summarize(title, content) if content else None
+            summary = result["summary"] if result else None
+            tags = result["tags"] if result else None
+            score = result["score"] if result else None
+
             saved = await db.add_post(
                 member_id=member["id"],
                 title=title,
                 link=link,
-                published_at=published_str
+                published_at=published_str,
+                summary=summary,
+                tags=",".join(tags) if tags else None,
+                score=score,
             )
 
             if saved:
                 mention = f"<@{member['discord_id']}>"
-                content = extract_entry_content(entry)
-                summary = await summarize(title, content) if content else None
-                summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and summary is None
+                summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and result is None
                 embed = new_post_embed(
                     author_name=mention,
                     title=title,
                     link=link,
                     published_at=published_str,
                     summary=summary,
+                    tags=tags,
                     summary_failed=summary_failed,
                 )
                 await channel.send(embed=embed)
@@ -217,15 +225,22 @@ class RSSMonitor(commands.Cog):
                     except Exception:
                         published_str = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    saved = await db.add_post(member["id"], title, link, published_str)
+                    content = extract_entry_content(entry)
+                    result = await summarize(title, content) if content else None
+                    summary = result["summary"] if result else None
+                    tags = result["tags"] if result else None
+                    score = result["score"] if result else None
+
+                    saved = await db.add_post(
+                        member["id"], title, link, published_str,
+                        summary=summary, tags=",".join(tags) if tags else None, score=score,
+                    )
                     if saved:
                         mention = f"<@{member['discord_id']}>"
-                        content = extract_entry_content(entry)
-                        summary = await summarize(title, content) if content else None
-                        summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and summary is None
+                        summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and result is None
                         embed = new_post_embed(
                             mention, title, link, published_str,
-                            summary=summary, summary_failed=summary_failed,
+                            summary=summary, tags=tags, summary_failed=summary_failed,
                         )
                         await channel.send(embed=embed)
                         new_count += 1

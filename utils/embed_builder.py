@@ -73,12 +73,35 @@ def bot_welcome_embed() -> discord.Embed:
     return embed
 
 
+def _tags_text(tags: list[str] | None) -> str | None:
+    """태그 리스트를 '#태그1 #태그2' 형태로. 없으면 None."""
+    if not tags:
+        return None
+    return " ".join(f"#{t}" for t in tags)
+
+
+def _best_post_line(best_post: dict | None) -> str | None:
+    """'티나가 뽑은 글' 필드 값. 제목 링크(+태그). 점수는 표시하지 않음."""
+    if not best_post:
+        return None
+    title = best_post.get("title") or "제목 없음"
+    link = best_post.get("link") or ""
+    line = f"[{title}]({link})"
+    tags = best_post.get("tags")
+    if tags:
+        tt = _tags_text([t for t in tags.split(",") if t])
+        if tt:
+            line += f"\n{tt}"
+    return line
+
+
 def new_post_embed(
     author_name: str,
     title: str,
     link: str,
     published_at: str,
     summary: str | None = None,
+    tags: list[str] | None = None,
     summary_failed: bool = False,
 ) -> discord.Embed:
     """새 블로그 글 알림 Embed"""
@@ -91,6 +114,10 @@ def new_post_embed(
     embed.add_field(name="제목", value=_truncate_field(f"[{title}]({link})"), inline=False)
     embed.add_field(name="작성자", value=author_name, inline=True)
     embed.add_field(name="발행일", value=published_at, inline=True)
+
+    tag_text = _tags_text(tags)
+    if tag_text:
+        embed.add_field(name="태그", value=_truncate_field(tag_text), inline=False)
 
     if summary:
         embed.add_field(name="요약", value=_truncate_field(summary), inline=False)
@@ -124,6 +151,7 @@ def weekly_report_embed(
     member_stats: list[dict],
     penalty_amount: int,
     is_paused: bool = False,
+    best_post: dict | None = None,
 ) -> discord.Embed:
     """주간 리포트 Embed"""
     embed = discord.Embed(
@@ -153,6 +181,10 @@ def weekly_report_embed(
             value=_truncate_field(", ".join(penalty_members)),
             inline=False
         )
+
+    best_line = _best_post_line(best_post)
+    if best_line:
+        embed.add_field(name="🏆 티나가 뽑은 이번 주의 글", value=_truncate_field(best_line), inline=False)
 
     embed.set_footer(text="티나 • 주간 리포트")
 
@@ -555,7 +587,7 @@ def register_success_embed(
     return embed
 
 
-def monthly_report_embed(year: int, month: int, member_stats: list[dict]) -> discord.Embed:
+def monthly_report_embed(year: int, month: int, member_stats: list[dict], best_post: dict | None = None) -> discord.Embed:
     """월간 리포트 Embed"""
     embed = discord.Embed(
         title=f"🏆 {year}년 {month}월 월간 블로그 리포트",
@@ -569,6 +601,11 @@ def monthly_report_embed(year: int, month: int, member_stats: list[dict]) -> dis
         value=_truncate_field(_rank_lines(member_stats, with_penalty=False)),
         inline=False,
     )
+
+    best_line = _best_post_line(best_post)
+    if best_line:
+        embed.add_field(name="🏆 티나가 뽑은 이번 달의 글", value=_truncate_field(best_line), inline=False)
+
     embed.set_footer(text="티나 • 월간 리포트")
     return embed
 

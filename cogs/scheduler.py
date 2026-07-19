@@ -147,7 +147,8 @@ class Scheduler(commands.Cog):
                     await db.add_penalty(first_member_id, week_start, week_end, penalty_amount)
                     logger.info("벌금 부과: %s (%s원)", stat["discord_name"], penalty_amount)
 
-        embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused)
+        best = await db.get_top_scored_post(guild_id, week_start, week_end)
+        embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused, best_post=best)
         await channel.send(embed=embed)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
@@ -299,7 +300,8 @@ class Scheduler(commands.Cog):
             stats_by_discord[did]["post_count"] += count
         member_stats = list(stats_by_discord.values())
 
-        embed = monthly_report_embed(prev_year, prev_month, member_stats)
+        best = await db.get_top_scored_post(guild_id, month_start, month_end)
+        embed = monthly_report_embed(prev_year, prev_month, member_stats, best_post=best)
         await channel.send(embed=embed)
         logger.info("월간 리포트 발송 완료 [Guild: %s] (%d년 %d월)", guild_id, prev_year, prev_month)
 
