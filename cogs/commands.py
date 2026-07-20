@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+from datetime import datetime, timedelta
 
 import database as db
 from utils.time_utils import get_week_range, get_month_range, format_date_range
@@ -12,7 +13,7 @@ from utils.embed_builder import (
     refresh_embed, info_embed,
     not_registered_embed,
     no_members_embed, system_error_embed, post_list_embed,
-    leaderboard_embed, streak_embed,
+    leaderboard_embed, streak_embed, streak_detail_embed,
 )
 
 logger = logging.getLogger(__name__)
@@ -268,21 +269,65 @@ class Commands(commands.Cog):
             guild_member = interaction.guild.get_member(int(e["discord_id"]))
             if guild_member:
                 e["discord_name"] = guild_member.display_name
-        await interaction.followup.send(embed=leaderboard_embed(entries))
 
-    @app_commands.command(name="스트릭", description="멤버들의 연속 작성 스트릭을 확인합니다")
-    @app_commands.guild_only()
-    async def streak(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        guild_id = str(interaction.guild_id)
-        entries = await db.get_all_streaks(guild_id)
-
-        for e in entries:
+        # 최장 연속 스트릭: best>=2, best 내림차순(동점은 discord_id로 결정적)
+        streaks = await db.get_all_streaks(guild_id)
+        streak_entries = sorted(
+            [s for s in streaks if s["best"] >= 2],
+            key=lambda s: (-s["best"], s["discord_id"]),
+        )
+        for e in streak_entries:
             guild_member = interaction.guild.get_member(int(e["discord_id"]))
             if guild_member:
                 e["discord_name"] = guild_member.display_name
 
-        await interaction.followup.send(embed=streak_embed(entries))
+        await interaction.followup.send(embed=leaderboard_embed(entries, streak_entries))
+
+    @app_commands.command(name="스트릭", description="연속 작성 스트릭을 확인합니다 (유저 지정 시 개인 잔디)")
+    @app_commands.describe(유저="개인 스트릭 잔디를 볼 유저 (미입력 시 전체 현황)")
+    @app_commands.guild_only()
+    async def streak(self, interaction: discord.Interaction, 유저: discord.Member = None):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+
+        if 유저 is None:
+            entries = await db.get_all_streaks(guild_id)
+            for e in entries:
+                guild_member = interaction.guild.get_member(int(e["discord_id"]))
+                if guild_member:
+                    e["discord_name"] = guild_member.display_name
+            await interaction.followup.send(embed=streak_embed(entries))
+            return
+
+        # 개인 잔디 그리드: 최근 12주 작성 여부
+        members = await db.get_members_by_discord_id(guild_id, str(유저.id))
+        if not members:
+            await interaction.followup.send(embed=not_registered_embed(유저.display_name), ephemeral=True)
+            return
+
+        r_day, r_hour, r_min = await db.get_reset_time(guild_id)
+        cur_start_str, cur_end_str = get_week_range(reset_weekday=r_day, reset_hour=r_hour, reset_minute=r_min)
+        cur_start = datetime.strptime(cur_start_str, "%Y-%m-%d %H:%M:%S")
+        WEEKS = 12
+        slot0_start = cur_start - timedelta(weeks=WEEKS - 1)
+        slot0_str = slot0_start.strftime("%Y-%m-%d %H:%M:%S")
+
+        grid = [False] * WEEKS
+        for m in members:
+            posts = await db.get_posts_in_range(m["id"], slot0_str, cur_end_str)
+            for p in posts:
+                try:
+                    pdt = datetime.strptime(p["published_at"], "%Y-%m-%d %H:%M:%S")
+                except (TypeError, ValueError):
+                    continue
+                idx = (pdt - slot0_start).days // 7
+                if 0 <= idx < WEEKS:
+                    grid[idx] = True
+
+        s = await db.get_streak(guild_id, str(유저.id))
+        await interaction.followup.send(
+            embed=streak_detail_embed(유저.display_name, s["current"], s["best"], grid)
+        )
 
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
     async def list_members(self, interaction: discord.Interaction):

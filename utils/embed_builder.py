@@ -36,23 +36,47 @@ def _rank_lines(member_stats: list[dict], *, with_penalty: bool) -> str:
     ranked = sorted(member_stats, key=lambda s: (-s["post_count"], str(s["discord_id"])))
 
     lines = []
-    rank = 0          # 실제 등수(동점 공유, 1부터)
-    prev_count = None
-    seen = 0          # 지금까지 본 작성자 수 (동점 등수 계산용)
-    for stat in ranked:
-        count = stat["post_count"]
-        name = stat.get("discord_name", "알 수 없음")
+    seen = 0          # 지금까지 배치한 작성자 수 (동점 등수 계산용)
+    i = 0
+    while i < len(ranked):
+        count = ranked[i]["post_count"]
+        # 같은 편수(동점) 묶기 → 한 줄에 이름 모두 나열
+        group = []
+        while i < len(ranked) and ranked[i]["post_count"] == count:
+            group.append(ranked[i].get("discord_name", "알 수 없음"))
+            i += 1
+        names = ", ".join(f"**{n}**" for n in group)
         if count > 0:
-            seen += 1
-            if count != prev_count:
-                rank = seen  # 동점이 아니면 등수 = 순번
-            prev_count = count
+            rank = seen + 1  # 동점자 그룹은 같은 등수 공유
             icon = _MEDALS[rank - 1] if rank - 1 < len(_MEDALS) else _ICON_WROTE
-            lines.append(f"{icon} **{name}** — **{count}편**")
+            lines.append(f"{icon} {names} — **{count}편**")
+            seen += len(group)
         else:
             suffix = " (벌금)" if with_penalty else ""
-            lines.append(f"{_ICON_NONE} **{name}** — **0편**{suffix}")
+            lines.append(f"{_ICON_NONE} {names} — **0편**{suffix}")
     return "\n".join(lines)
+
+
+def _shared_rank_lines(items: list[tuple[str, int]], unit: str, max_rank: int = 3) -> list[str]:
+    """동점 공유(competition ranking) 메달 라인. items는 value 내림차순 정렬 전제.
+    같은 value 동점자는 한 메달 줄에 이름을 모두 나열하고, rank가 max_rank를 넘으면 중단."""
+    lines = []
+    seen = 0
+    i = 0
+    while i < len(items):
+        val = items[i][1]
+        group = []
+        while i < len(items) and items[i][1] == val:
+            group.append(items[i][0])
+            i += 1
+        rank = seen + 1
+        if rank > max_rank:
+            break
+        medal = _MEDALS[rank - 1] if rank - 1 < len(_MEDALS) else _ICON_WROTE
+        names = ", ".join(f"**{n}**" for n in group)
+        lines.append(f"{medal} {names} — **{val}{unit}**")
+        seen += len(group)
+    return lines
 
 
 def bot_welcome_embed() -> discord.Embed:
@@ -336,8 +360,8 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
             "`/등록` — 내 블로그 등록 (주소 입력 시 플랫폼 자동 인식)\n"
             "`/삭제` — 내 블로그 등록 해제\n"
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
-            "`/랭킹` — 명예의 전당 (한 주 최고 기록)\n"
-            "`/스트릭` — 연속 작성 현황 확인\n"
+            "`/랭킹` — 명예의 전당 (최다 작성·최장 스트릭)\n"
+            "`/스트릭 [@유저]` — 연속 작성 현황 (유저 지정 시 개인 잔디)\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/조회 [@유저]` — 이번 주 현황 / 포스팅 목록\n"
             "`/벌금 [@유저]` — 벌금 현황 조회\n"
@@ -615,29 +639,55 @@ def monthly_report_embed(year: int, month: int, member_stats: list[dict], best_p
     return embed
 
 
-def leaderboard_embed(entries: list[dict]) -> discord.Embed:
-    """누적 작성 명예의 전당 Embed"""
+def leaderboard_embed(entries: list[dict], streak_entries: list[dict] | None = None) -> discord.Embed:
+    """명예의 전당 Embed. 한 주 최다 작성 + 최장 연속 스트릭 2섹션."""
     embed = discord.Embed(
         title="🏆 명예의 전당",
-        description="지금까지 한 주에 가장 많이 작성한 멤버들이에요. 다들 대단해요!",
+        description="우리 서버의 자랑스러운 기록들이에요. 다들 대단해요!",
         color=COLOR_ADMIN,
         timestamp=get_kst_now()
     )
 
-    if not entries:
-        embed.add_field(name="순위", value="아직 작성된 글이 없어요.", inline=False)
+    if not entries and not streak_entries:
+        embed.add_field(name="순위", value="아직 기록이 없어요.", inline=False)
         embed.set_footer(text="티나 • 명예의 전당")
         return embed
 
-    # 명예의 전당은 상위 3명만 (동점 공유 없이, 같은 편수는 먼저 달성한 사람이 위 = DB 정렬)
-    lines = []
-    for i, e in enumerate(entries[:3]):
-        cnt = e["post_count"]
-        name = e.get("discord_name", "알 수 없음")
-        lines.append(f"{_MEDALS[i]} **{name}** — **{cnt}편**")
+    # 한 주 최다 작성: 상위 3명, 동점 공유 없이(같은 편수는 먼저 달성한 사람이 위 = DB 정렬)
+    if entries:
+        lines = []
+        for i, e in enumerate(entries[:3]):
+            cnt = e["post_count"]
+            name = e.get("discord_name", "알 수 없음")
+            lines.append(f"{_MEDALS[i]} **{name}** — **{cnt}편**")
+        embed.add_field(name="🏆 한 주 최다 작성", value=_truncate_field("\n".join(lines)), inline=False)
 
-    embed.add_field(name="순위", value=_truncate_field("\n".join(lines)), inline=False)
+    # 최장 연속 스트릭: best 내림차순, 동점 공유
+    if streak_entries:
+        items = [(e.get("discord_name", "알 수 없음"), e["best"]) for e in streak_entries]
+        slines = _shared_rank_lines(items, "주 연속")
+        if slines:
+            embed.add_field(name="🔥 최장 연속 스트릭", value=_truncate_field("\n".join(slines)), inline=False)
+
     embed.set_footer(text="티나 • 명예의 전당")
+    return embed
+
+
+def streak_detail_embed(name: str, current: int, best: int, grid: list[bool]) -> discord.Embed:
+    """개인 스트릭 상세 Embed. 최근 N주 잔디 그리드(🟩 작성 / ⬜ 미작성, 왼쪽 과거→오른쪽 최근)."""
+    embed = discord.Embed(
+        title=f"📅 {name}님의 스트릭",
+        description=f"🔥 현재 **{current}주 연속** ⭐ 최고 **{best}주**",
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+    grid_str = "".join("🟩" if w else "⬜" for w in grid)
+    embed.add_field(
+        name=f"최근 {len(grid)}주",
+        value=f"{grid_str}\n`←과거              최근→`",
+        inline=False,
+    )
+    embed.set_footer(text="티나 • 스트릭")
     return embed
 
 
