@@ -120,14 +120,16 @@ class Scheduler(commands.Cog):
                     pass
 
         # discord_id별로 포스팅 집계 (멀티 플랫폼 합산)
+        guild = self.bot.get_guild(int(guild_id))
         stats_by_discord = {}
         for member in members:
             did = member["discord_id"]
             posts = await db.get_posts_in_range(member["id"], week_start, week_end)
             if did not in stats_by_discord:
+                gm = guild.get_member(int(did)) if guild else None
                 stats_by_discord[did] = {
                     "discord_id": did,
-                    "discord_name": member["discord_name"],
+                    "discord_name": gm.display_name if gm else member["discord_name"],
                     "member_ids": [],
                     "posts": [],
                     "post_count": 0,
@@ -171,7 +173,12 @@ class Scheduler(commands.Cog):
 
         best = await db.get_top_scored_post(guild_id, week_start, week_end)
         embed = weekly_report_embed(week_start, week_end, member_stats, penalty_amount, is_paused, best_post=best, streaks=streaks)
-        await channel.send(embed=embed)
+        mentions = " ".join(f"<@{s['discord_id']}>" for s in member_stats)
+        try:
+            await channel.send(content=mentions or None, embed=embed)
+        except discord.HTTPException:
+            # content(참여자 멘션)가 2000자 초과 등으로 실패해도 리포트는 반드시 전송
+            await channel.send(embed=embed)
         logger.info("주간 리포트 발송 완료 [Guild: %s]", guild_id)
 
     @main_scheduler.before_loop
@@ -292,14 +299,15 @@ class Scheduler(commands.Cog):
                         )
 
                         if saved:
-                            mention = f"<@{member['discord_id']}>"
+                            gm = channel.guild.get_member(int(member["discord_id"]))
+                            author_display = gm.display_name if gm else member["discord_name"]
                             embed = missed_post_embed(
-                                author_name=mention,
+                                author_name=author_display,
                                 title=title,
                                 link=link,
                                 published_at=published_str
                             )
-                            await channel.send(embed=embed)
+                            await channel.send(content=f"<@{member['discord_id']}>", embed=embed)
                             logger.info("누락 글 감지 및 추가: [%s] %s", member["discord_name"], title)
             except Exception as e:
                 logger.error("사이트맵 파싱 오류 [%s]: %s", member["discord_name"], e)
@@ -319,14 +327,16 @@ class Scheduler(commands.Cog):
         prev_year = now.year if now.month > 1 else now.year - 1
 
         members = await db.get_all_members(guild_id)
+        guild = self.bot.get_guild(int(guild_id))
         stats_by_discord = {}
         for member in members:
             did = member["discord_id"]
             count = await db.get_post_count_in_range(member["id"], month_start, month_end)
             if did not in stats_by_discord:
+                gm = guild.get_member(int(did)) if guild else None
                 stats_by_discord[did] = {
                     "discord_id": did,
-                    "discord_name": member["discord_name"],
+                    "discord_name": gm.display_name if gm else member["discord_name"],
                     "post_count": 0,
                 }
             stats_by_discord[did]["post_count"] += count
@@ -334,7 +344,11 @@ class Scheduler(commands.Cog):
 
         best = await db.get_top_scored_post(guild_id, month_start, month_end)
         embed = monthly_report_embed(prev_year, prev_month, member_stats, best_post=best)
-        await channel.send(embed=embed)
+        mentions = " ".join(f"<@{s['discord_id']}>" for s in member_stats)
+        try:
+            await channel.send(content=mentions or None, embed=embed)
+        except discord.HTTPException:
+            await channel.send(embed=embed)
         logger.info("월간 리포트 발송 완료 [Guild: %s] (%d년 %d월)", guild_id, prev_year, prev_month)
 
 

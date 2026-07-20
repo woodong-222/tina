@@ -121,7 +121,7 @@ class Admin(commands.Cog):
         for m in members:
             new_total += await db.get_total_penalty(m["id"])
 
-        await interaction.followup.send(embed=penalty_change_embed(유저.mention, 금액, new_total))
+        await interaction.followup.send(content=유저.mention, embed=penalty_change_embed(유저.display_name, 금액, new_total))
         logger.info("벌금 수동 조정: %s (%+d원 → 총 %d원)", 유저.display_name, 금액, new_total)
 
     # ===== 벌금 정리 (정산/초기화 통합) =====

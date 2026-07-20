@@ -5,12 +5,23 @@ import database as db
 from utils.registration import register_and_report
 from utils.time_utils import parse_pause_until
 from utils.embed_builder import (
-    info_embed, error_embed, unregister_success_embed, not_registered_embed, COLOR_ADMIN,
+    info_embed, error_embed, unregister_success_embed,
+    settings_changed_embed, COLOR_ADMIN,
 )
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 120  # 초
+
+
+async def _announce_setting(interaction: discord.Interaction, guild_id: str, detail: str):
+    """설정 변경을 채널 전체에 공개 공지. 전송 권한 없어도 조용히 넘어감."""
+    try:
+        await interaction.channel.send(
+            embed=settings_changed_embed(interaction.user.display_name, detail)
+        )
+    except Exception as e:
+        logger.warning("설정 변경 공개 공지 실패 (Guild: %s): %s", guild_id, e)
 _DAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
 
@@ -191,6 +202,11 @@ class ResetTimeView(_AdminView):
             ),
             view=self,
         )
+        await _announce_setting(
+            interaction, self.guild_id,
+            f"주간 초기화가 **{_DAYS[self.weekday]}요일 {self.hour:02d}:{self.minute:02d}**로 변경되었어요.\n"
+            f"마감 리마인드는 **{remind}요일 {self.hour:02d}:{self.minute:02d}**에 발송됩니다.",
+        )
         self.stop()
         logger.info("초기화 시간 설정(패널): %s %02d:%02d (Guild: %s)",
                     _DAYS[self.weekday], self.hour, self.minute, self.guild_id)
@@ -220,6 +236,7 @@ class PenaltyAmountModal(discord.ui.Modal, title="벌금 금액 설정"):
             embed=info_embed("설정 완료", f"벌금 금액을 **{val:,}원**으로 변경했어요!", color=COLOR_ADMIN),
             ephemeral=True,
         )
+        await _announce_setting(interaction, self.guild_id, f"벌금 금액이 **{val:,}원**으로 변경되었어요.")
         logger.info("벌금 금액 설정(패널): %d원 (Guild: %s)", val, self.guild_id)
 
 
@@ -250,11 +267,15 @@ class PenaltyPauseModal(discord.ui.Modal, title="벌금 기간 정지"):
         await interaction.response.send_message(
             embed=info_embed(
                 "벌금 일시정지",
-                f"**{dt.strftime('%Y년 %m월 %d일 %H:%M')}**까지 벌금 부과를 정지했어요.\n"
-                f"해당 시점 이후 주간 리포트부터 자동 재개됩니다.",
+                f"**{dt.strftime('%Y년 %m월 %d일 %H:%M')}**까지 벌금 부과를 정지했어요.",
                 color=COLOR_ADMIN,
             ),
             ephemeral=True,
+        )
+        await _announce_setting(
+            interaction, self.guild_id,
+            f"**{dt.strftime('%Y년 %m월 %d일 %H:%M')}**까지 벌금 부과가 정지되었어요.\n"
+            f"해당 시점 이후 주간 리포트부터 자동 재개됩니다.",
         )
         logger.info("벌금 기간 정지(패널): %s까지 (Guild: %s)", paused_until, self.guild_id)
 
@@ -271,9 +292,10 @@ class PenaltyControlView(_AdminView):
         await db.set_setting(self.guild_id, "penalty_paused", "0")
         await db.set_setting(self.guild_id, "penalty_paused_until", "")
         await interaction.response.send_message(
-            embed=info_embed("벌금 재개", "벌금 부과가 재개되었어요. 다들 이번 주도 파이팅!", color=COLOR_ADMIN),
+            embed=info_embed("벌금 재개", "벌금 부과를 재개했어요.", color=COLOR_ADMIN),
             ephemeral=True,
         )
+        await _announce_setting(interaction, self.guild_id, "벌금 부과가 재개되었어요. 다들 이번 주도 파이팅!")
         logger.info("벌금 재개(패널) (Guild: %s)", self.guild_id)
 
     @discord.ui.button(label="무기한 정지", style=discord.ButtonStyle.danger)
@@ -284,6 +306,7 @@ class PenaltyControlView(_AdminView):
             embed=info_embed("벌금 정지", "벌금 부과를 무기한 정지했어요. 재개 버튼으로 해제할 수 있어요.", color=COLOR_ADMIN),
             ephemeral=True,
         )
+        await _announce_setting(interaction, self.guild_id, "벌금 부과가 무기한 정지되었어요. 재개 버튼으로 해제할 수 있어요.")
         logger.info("벌금 무기한 정지(패널) (Guild: %s)", self.guild_id)
 
     @discord.ui.button(label="기간 정지", style=discord.ButtonStyle.secondary)
@@ -321,6 +344,7 @@ class ChannelSelectView(_AdminView):
             embed=info_embed("설정 완료", f"알림 채널을 <#{picked.id}>으로 설정했어요!", color=COLOR_ADMIN),
             view=None,
         )
+        await _announce_setting(interaction, self.guild_id, f"알림 채널이 <#{picked.id}>으로 변경되었어요.")
         self.stop()
         logger.info("알림 채널 설정(패널): %s (Guild: %s)", picked.id, self.guild_id)
 

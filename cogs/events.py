@@ -45,7 +45,7 @@ class Events(commands.Cog):
             reset_day_str = f"{days[r_day]}요일"
             reset_time_str = f"{r_hour:02d}:{r_min:02d}"
 
-            embed = welcome_embed(member.mention, reset_day=reset_day_str, reset_time=reset_time_str)
+            embed = welcome_embed(member.display_name, reset_day=reset_day_str, reset_time=reset_time_str)
             await channel.send(content=f"{member.mention}", embed=embed)
         except Exception as e:
             logger.error("환영 메시지 전송 실패: %s", e)

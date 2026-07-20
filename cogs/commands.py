@@ -264,6 +264,10 @@ class Commands(commands.Cog):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
         entries = await db.get_best_week_counts(guild_id)
+        for e in entries:
+            guild_member = interaction.guild.get_member(int(e["discord_id"]))
+            if guild_member:
+                e["discord_name"] = guild_member.display_name
         await interaction.followup.send(embed=leaderboard_embed(entries))
 
     @app_commands.command(name="스트릭", description="멤버들의 연속 작성 스트릭을 확인합니다")

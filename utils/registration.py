@@ -3,7 +3,7 @@ import discord
 
 import database as db
 from utils.blog_utils import (
-    normalize_tistory_url, normalize_velog_url, normalize_blog_url,
+    normalize_tistory_url, normalize_velog_url,
     check_url_accessible, scan_and_save_existing_posts,
 )
 from utils.time_utils import get_week_range, get_month_range
@@ -31,11 +31,17 @@ async def register_and_report(
         return
 
     if platform is None:
-        blog_url = normalize_blog_url(raw_url)
-        if not blog_url:
-            await interaction.followup.send(embed=invalid_blog_url_embed())
-            return
-        platform = "tistory" if "tistory.com" in blog_url else "velog"
+        # 결과 문자열 substring이 아니라 어느 normalizer가 매칭됐는지로 판별
+        # (예: velog.io/@tistory.com 유저명 오분류 방지)
+        tistory_url = normalize_tistory_url(raw_url)
+        if tistory_url:
+            platform, blog_url = "tistory", tistory_url
+        else:
+            velog_url = normalize_velog_url(raw_url)
+            if not velog_url:
+                await interaction.followup.send(embed=invalid_blog_url_embed())
+                return
+            platform, blog_url = "velog", velog_url
     elif platform == "tistory":
         blog_url = normalize_tistory_url(raw_url)
         if not blog_url:
@@ -75,8 +81,9 @@ async def register_and_report(
             logger.error("기존 글 스캔 실패 [%s]: %s", display_user.display_name, e)
 
     await interaction.followup.send(
+        content=display_user.mention,
         embed=register_success_embed(
-            display_user.mention, blog_url, existing_count, week_count, month_count, is_admin=is_admin
+            display_user.display_name, blog_url, existing_count, week_count, month_count, is_admin=is_admin
         )
     )
     logger.info(
