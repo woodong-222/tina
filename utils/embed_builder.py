@@ -684,7 +684,7 @@ def streak_detail_embed(name: str, current: int, best: int, grid: list[bool]) ->
     grid_str = "".join("🟩" if w else "⬜" for w in grid)
     embed.add_field(
         name=f"최근 {len(grid)}주",
-        value=f"{grid_str}\n`←과거              최근→`",
+        value=grid_str,
         inline=False,
     )
     embed.set_footer(text="티나 • 스트릭")
