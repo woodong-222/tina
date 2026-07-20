@@ -5,14 +5,14 @@ import logging
 
 import database as db
 from utils.time_utils import get_week_range, get_month_range, format_date_range
-from utils.components import RegisterPlatformView, UnregisterView
+from utils.components import BlogRegisterModal, UnregisterView
 from utils.embed_builder import (
     stats_embed, status_embed, help_embed, admin_help_embed, penalty_embed,
     server_stats_embed, server_penalty_embed, member_list_embed,
     refresh_embed, info_embed,
     not_registered_embed,
     no_members_embed, system_error_embed, post_list_embed,
-    leaderboard_embed,
+    leaderboard_embed, streak_embed,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,13 +24,10 @@ class Commands(commands.Cog):
 
     # ===== 등록 =====
 
-    @app_commands.command(name="등록", description="내 블로그를 봇에 등록합니다 (티스토리/벨로그 선택)")
+    @app_commands.command(name="등록", description="내 블로그를 봇에 등록합니다 (주소로 자동 인식)")
     @app_commands.guild_only()
     async def register(self, interaction: discord.Interaction):
-        view = RegisterPlatformView()
-        embed = info_embed("블로그 등록", "등록할 플랫폼을 선택하면 주소 입력창이 나와요.")
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        view.message = await interaction.original_response()
+        await interaction.response.send_modal(BlogRegisterModal())
 
     # ===== 삭제 =====
 
@@ -268,6 +265,20 @@ class Commands(commands.Cog):
         guild_id = str(interaction.guild_id)
         entries = await db.get_best_week_counts(guild_id)
         await interaction.followup.send(embed=leaderboard_embed(entries))
+
+    @app_commands.command(name="스트릭", description="멤버들의 연속 작성 스트릭을 확인합니다")
+    @app_commands.guild_only()
+    async def streak(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+        entries = await db.get_all_streaks(guild_id)
+
+        for e in entries:
+            guild_member = interaction.guild.get_member(int(e["discord_id"]))
+            if guild_member:
+                e["discord_name"] = guild_member.display_name
+
+        await interaction.followup.send(embed=streak_embed(entries))
 
     @app_commands.command(name="멤버목록", description="등록된 멤버 목록을 조회합니다")
     async def list_members(self, interaction: discord.Interaction):

@@ -173,9 +173,11 @@ class RSSMonitor(commands.Cog):
 
             if saved:
                 mention = f"<@{member['discord_id']}>"
+                gm = channel.guild.get_member(int(member["discord_id"]))
+                author_display = gm.display_name if gm else member["discord_name"]
                 summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and result is None
                 embed = new_post_embed(
-                    author_name=mention,
+                    author_name=author_display,
                     title=title,
                     link=link,
                     published_at=published_str,
@@ -183,7 +185,7 @@ class RSSMonitor(commands.Cog):
                     tags=tags,
                     summary_failed=summary_failed,
                 )
-                await channel.send(embed=embed)
+                await channel.send(content=mention, embed=embed)
                 logger.info("새 글 감지: [%s] %s", member["discord_name"], title)
                 new_count += 1
 
@@ -237,12 +239,14 @@ class RSSMonitor(commands.Cog):
                     )
                     if saved:
                         mention = f"<@{member['discord_id']}>"
+                        gm = channel.guild.get_member(int(member["discord_id"]))
+                        author_display = gm.display_name if gm else member["discord_name"]
                         summary_failed = bool(Config.GEMINI_API_KEY) and bool(content) and result is None
                         embed = new_post_embed(
-                            mention, title, link, published_str,
+                            author_display, title, link, published_str,
                             summary=summary, tags=tags, summary_failed=summary_failed,
                         )
-                        await channel.send(embed=embed)
+                        await channel.send(content=mention, embed=embed)
                         new_count += 1
             except Exception as e:
                 logger.error("수동 폴링 실패 [%s]: %s", member["discord_name"], e)

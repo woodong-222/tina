@@ -3,14 +3,14 @@ import discord
 
 import database as db
 from utils.blog_utils import (
-    normalize_tistory_url, normalize_velog_url,
+    normalize_tistory_url, normalize_velog_url, normalize_blog_url,
     check_url_accessible, scan_and_save_existing_posts,
 )
 from utils.time_utils import get_week_range, get_month_range
 from utils.embed_builder import (
     register_success_embed, already_registered_embed,
-    invalid_tistory_url_embed, invalid_velog_url_embed, connection_error_embed,
-    error_embed,
+    invalid_tistory_url_embed, invalid_velog_url_embed, invalid_blog_url_embed,
+    connection_error_embed, error_embed,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,17 +19,24 @@ logger = logging.getLogger(__name__)
 async def register_and_report(
     interaction: discord.Interaction,
     raw_url: str,
-    platform: str,
+    platform: str | None = None,
     *,
     display_user: discord.Member,
     is_admin: bool,
 ):
-    """블로그 등록 공통 플로우. 호출 측에서 interaction.response는 이미 defer된 상태여야 함."""
+    """블로그 등록 공통 플로우. 호출 측에서 interaction.response는 이미 defer된 상태여야 함.
+    platform이 None이면 URL로 티스토리/벨로그를 자동 인지한다."""
     if interaction.guild_id is None:
         await interaction.followup.send(embed=error_embed("이 명령은 서버 안에서만 사용할 수 있어요."))
         return
 
-    if platform == "tistory":
+    if platform is None:
+        blog_url = normalize_blog_url(raw_url)
+        if not blog_url:
+            await interaction.followup.send(embed=invalid_blog_url_embed())
+            return
+        platform = "tistory" if "tistory.com" in blog_url else "velog"
+    elif platform == "tistory":
         blog_url = normalize_tistory_url(raw_url)
         if not blog_url:
             await interaction.followup.send(embed=invalid_tistory_url_embed())

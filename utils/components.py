@@ -16,70 +16,27 @@ _DAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
 # ===== 본인 블로그 등록 모달 (공개) =====
 
-class BlogRegisterModal(discord.ui.Modal):
-    def __init__(self, platform: str, *, display_user=None, is_admin: bool = False):
-        self.platform = platform
+class BlogRegisterModal(discord.ui.Modal, title="블로그 등록"):
+    """URL만 입력받아 티스토리/벨로그를 자동 인지하여 등록. 본인/관리자 공용."""
+
+    blog_url = discord.ui.TextInput(
+        label="블로그 주소",
+        placeholder="예: 아이디.tistory.com 또는 velog.io/@아이디",
+        required=True, max_length=200,
+    )
+
+    def __init__(self, *, display_user=None, is_admin: bool = False):
+        super().__init__(timeout=_TIMEOUT)
         self._display_user = display_user
         self._is_admin = is_admin
-        title = "티스토리 등록" if platform == "tistory" else "벨로그 등록"
-        super().__init__(title=title, timeout=_TIMEOUT)
-        placeholder = (
-            "https://아이디.tistory.com" if platform == "tistory"
-            else "https://velog.io/@아이디"
-        )
-        self.blog_url = discord.ui.TextInput(
-            label="블로그 주소", placeholder=placeholder, required=True, max_length=200
-        )
-        self.add_item(self.blog_url)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         user = self._display_user or interaction.user
         await register_and_report(
-            interaction, self.blog_url.value, self.platform,
+            interaction, self.blog_url.value,
             display_user=user, is_admin=self._is_admin,
         )
-
-
-class RegisterPlatformView(discord.ui.View):
-    """플랫폼(티스토리/벨로그) 선택 → URL 모달. 본인/관리자 공용."""
-
-    def __init__(self, *, display_user=None, is_admin: bool = False):
-        super().__init__(timeout=_TIMEOUT)
-        self.display_user = display_user
-        self.is_admin = is_admin
-        self.message = None
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if self.is_admin and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                embed=error_embed("이 명령은 서버 관리자만 사용할 수 있어요."), ephemeral=True
-            )
-            return False
-        return True
-
-    async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-        if self.message:
-            try:
-                await self.message.edit(view=self)
-            except Exception:
-                pass
-
-    @discord.ui.select(
-        placeholder="플랫폼을 선택하세요",
-        options=[
-            discord.SelectOption(label="티스토리", value="tistory", emoji="📕"),
-            discord.SelectOption(label="벨로그", value="velog", emoji="📗"),
-        ],
-    )
-    async def pick(self, interaction: discord.Interaction, select: discord.ui.Select):
-        platform = select.values[0]
-        await interaction.response.send_modal(
-            BlogRegisterModal(platform, display_user=self.display_user, is_admin=self.is_admin)
-        )
-        self.stop()
 
 
 class _UnregisterSelect(discord.ui.Select):

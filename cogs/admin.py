@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
-from utils.components import RegisterPlatformView, UnregisterView, _AdminView
+from utils.components import BlogRegisterModal, UnregisterView, _AdminView
 from utils.time_utils import get_week_range
 from utils.embed_builder import (
     info_embed, error_embed,
@@ -58,19 +58,12 @@ class Admin(commands.Cog):
 
     # ===== 멤버 등록/삭제 =====
 
-    @app_commands.command(name="멤버등록", description="[관리자] 멤버의 블로그를 등록합니다 (플랫폼 선택)")
+    @app_commands.command(name="멤버등록", description="[관리자] 멤버의 블로그를 등록합니다 (주소로 자동 인식)")
     @app_commands.describe(유저="등록할 디스코드 유저")
     @app_commands.guild_only()
     @is_admin()
     async def register_member(self, interaction: discord.Interaction, 유저: discord.Member):
-        view = RegisterPlatformView(display_user=유저, is_admin=True)
-        embed = info_embed(
-            "멤버 블로그 등록",
-            f"**{유저.display_name}**님의 등록할 플랫폼을 선택하면 주소 입력창이 나와요.",
-            color=COLOR_ADMIN,
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        view.message = await interaction.original_response()
+        await interaction.response.send_modal(BlogRegisterModal(display_user=유저, is_admin=True))
 
     @app_commands.command(name="멤버삭제", description="[관리자] 멤버의 블로그 등록을 해제합니다")
     @app_commands.describe(유저="삭제할 디스코드 유저")

@@ -120,9 +120,9 @@ def new_post_embed(
         embed.add_field(name="태그", value=_truncate_field(tag_text), inline=False)
 
     if summary:
-        embed.add_field(name="요약", value=_truncate_field(summary), inline=False)
+        embed.add_field(name="내용 요약", value=_truncate_field(summary), inline=False)
     elif summary_failed:
-        embed.add_field(name="요약", value="요약을 생성하지 못했어요.", inline=False)
+        embed.add_field(name="내용 요약", value="요약을 생성하지 못했어요.", inline=False)
 
     embed.set_footer(text="티나 • 블로그 포스팅 알림")
 
@@ -175,17 +175,17 @@ def weekly_report_embed(
     ]
 
     if is_paused:
-        embed.add_field(name="벌금 정지", value="이번 주는 벌금이 정지되었어요.", inline=False)
+        embed.add_field(name="​\n벌금 정지", value="이번 주는 벌금이 정지되었어요.", inline=False)
     elif penalty_members:
         embed.add_field(
-            name=f"💰 벌금 대상 ({penalty_amount:,}원)",
+            name=f"​\n💰 벌금 대상 ({penalty_amount:,}원)",
             value=_truncate_field(", ".join(penalty_members)),
             inline=False
         )
 
     best_line = _best_post_line(best_post)
     if best_line:
-        embed.add_field(name="🏆 티나가 뽑은 이번 주의 글", value=_truncate_field(best_line), inline=False)
+        embed.add_field(name="​\n🏆 티나가 뽑은 이번 주의 글", value=_truncate_field(best_line), inline=False)
 
     if streaks:
         streak_items = sorted(
@@ -352,10 +352,11 @@ def help_embed(reset_day: str = "월요일", reset_time: str = "09:00", remind_d
         name="📊 일반 명령어",
         value=(
             "*(명령어 뒤에 `@유저`를 지정하지 않으면 전체를 보여줍니다)*\n"
-            "`/등록` — 내 블로그 등록 (티스토리/벨로그 선택 후 주소 입력)\n"
+            "`/등록` — 내 블로그 등록 (주소 입력 시 플랫폼 자동 인식)\n"
             "`/삭제` — 내 블로그 등록 해제\n"
             "`/멤버목록` — 등록된 멤버 목록 확인\n"
-            "`/랭킹` — 누적 작성 명예의 전당\n"
+            "`/랭킹` — 명예의 전당 (한 주 최고 기록)\n"
+            "`/스트릭` — 연속 작성 현황 확인\n"
             "`/통계 [@유저]` — 이번 주/달 포스팅 통계\n"
             "`/조회 [@유저]` — 이번 주 현황 / 포스팅 목록\n"
             "`/벌금 [@유저]` — 벌금 현황 조회\n"
@@ -647,6 +648,33 @@ def leaderboard_embed(entries: list[dict]) -> discord.Embed:
     return embed
 
 
+def streak_embed(entries: list[dict]) -> discord.Embed:
+    """연속 작성 스트릭 현황 Embed. entries: discord_name, current, best (current 내림차순 정렬됨)."""
+    embed = discord.Embed(
+        title="🔥 연속 작성 스트릭",
+        description="한 주도 빠지지 않고 꾸준히 작성 중인 멤버들이에요!",
+        color=COLOR_ADMIN,
+        timestamp=get_kst_now()
+    )
+
+    active = [e for e in entries if e.get("current", 0) > 0]
+    if not active:
+        embed.add_field(name="현황", value="아직 진행 중인 스트릭이 없어요. 이번 주부터 시작해봐요!", inline=False)
+        embed.set_footer(text="티나 • 스트릭")
+        return embed
+
+    lines = []
+    for e in active:
+        name = e.get("discord_name", "알 수 없음")
+        cur = e.get("current", 0)
+        best = e.get("best", 0)
+        lines.append(f"🔥 **{name}** — **{cur}주 연속** (최고 {best}주)")
+
+    embed.add_field(name="현황", value=_truncate_field("\n".join(lines)), inline=False)
+    embed.set_footer(text="티나 • 스트릭")
+    return embed
+
+
 def remind_dm_embed(guild_name: str, reset_day: str, reset_time: str) -> discord.Embed:
     """마감 임박 개인 DM 리마인드 Embed"""
     embed = discord.Embed(
@@ -713,6 +741,14 @@ def invalid_velog_url_embed() -> discord.Embed:
     return error_embed(
         "유효한 벨로그 주소를 입력해주세요!\n"
         "예: `https://velog.io/@아이디` 혹은 `velog.io/@아이디`"
+    )
+
+
+def invalid_blog_url_embed() -> discord.Embed:
+    """플랫폼을 인식할 수 없는 URL 알림 Embed"""
+    return error_embed(
+        "주소를 확인해주세요! 티나는 **티스토리**와 **벨로그**만 지원해요.\n"
+        "예: `https://아이디.tistory.com` 또는 `https://velog.io/@아이디`"
     )
 
 

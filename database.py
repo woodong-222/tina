@@ -396,10 +396,7 @@ async def get_best_week_counts(guild_id: str) -> list[dict]:
     offset = timedelta(days=weekday, hours=hour, minutes=minute)
     async with _pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT w.discord_id,
-                      MAX(mm.discord_name) AS discord_name,
-                      MAX(w.cnt) AS post_count
-               FROM (
+            """WITH weekly AS (
                    SELECT m.discord_id AS discord_id,
                           date_trunc('week', p.published_at::timestamp - $2::interval) AS wk,
                           COUNT(*) AS cnt
@@ -409,12 +406,37 @@ async def get_best_week_counts(guild_id: str) -> list[dict]:
                      AND p.is_initial = 0
                      AND p.published_at IS NOT NULL
                    GROUP BY m.discord_id, date_trunc('week', p.published_at::timestamp - $2::interval)
-               ) w
-               JOIN members mm ON mm.discord_id = w.discord_id AND mm.guild_id = $1
-               GROUP BY w.discord_id
-               HAVING MAX(w.cnt) > 0
-               ORDER BY MAX(w.cnt) DESC, w.discord_id ASC""",
+               ),
+               best AS (
+                   SELECT discord_id, MAX(cnt) AS post_count
+                   FROM weekly GROUP BY discord_id HAVING MAX(cnt) > 0
+               )
+               SELECT b.discord_id,
+                      (SELECT MAX(discord_name) FROM members
+                       WHERE discord_id = b.discord_id AND guild_id = $1) AS discord_name,
+                      b.post_count,
+                      MIN(w.wk) AS first_achieved
+               FROM best b
+               JOIN weekly w ON w.discord_id = b.discord_id AND w.cnt = b.post_count
+               GROUP BY b.discord_id, b.post_count
+               ORDER BY b.post_count DESC, first_achieved ASC, b.discord_id ASC""",
             guild_id, offset
+        )
+        return [dict(row) for row in rows]
+
+
+async def get_all_streaks(guild_id: str) -> list[dict]:
+    """길드 전체 스트릭. discord_id, discord_name, current, best. current 내림차순."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT s.discord_id,
+                      (SELECT MAX(discord_name) FROM members
+                       WHERE discord_id = s.discord_id AND guild_id = $1) AS discord_name,
+                      s.current, s.best
+               FROM streaks s
+               WHERE s.guild_id = $1
+               ORDER BY s.current DESC, s.best DESC""",
+            guild_id
         )
         return [dict(row) for row in rows]
 
